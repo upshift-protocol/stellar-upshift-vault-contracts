@@ -4,8 +4,7 @@
 # and branch protection on `main` requires at least one approving review
 # from a code owner before a PR can be merged.
 #
-# Add more individuals or a team (e.g. @upshift-protocol/engineering) so that
-# review is not bottlenecked on a single person — a PR's author cannot approve
-# their own PR, so at least two code owners are needed for self-service merges.
+# Two owners are listed so review is not bottlenecked on one person — a PR's
+# author cannot approve their own PR, so either owner can approve the other's.
 
-* @gr-august
+* @gr-august @ae2212
