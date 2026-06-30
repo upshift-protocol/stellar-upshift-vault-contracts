@@ -193,6 +193,10 @@ Deploy script parameters:
 
 This code is provided as-is. Review the source and your own deployment parameters before using it with real funds. To report a security issue, please contact the maintainers rather than opening a public issue.
 
+## Reproducible Builds & Verification
+
+The bytecode deployed on Stellar Mainnet is reproducible from this source: building with the pinned toolchain yields a WASM whose hash is byte-for-byte identical to what runs on-chain. See **[VERIFY.md](VERIFY.md)** for the exact toolchain, build steps, the expected hash, and how to verify the live contracts yourself.
+
 ## Project Structure
 
 ```
@@ -231,6 +235,7 @@ stellar-upshift-vault-contracts/
 ├── Makefile                        # Common commands
 ├── deny.toml                       # cargo-deny config (advisories, licenses, bans)
 ├── rust-toolchain.toml             # Rust toolchain configuration
+├── VERIFY.md                       # Reproducible build & on-chain verification
 └── README.md
 ```
 
