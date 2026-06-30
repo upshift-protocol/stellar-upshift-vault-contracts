@@ -1,29 +1,31 @@
-# Stellar Vault Program
+# Upshift Stellar Vault Contracts
 
-A share-based vault contract for Stellar Soroban, built on the [OpenZeppelin Stellar Contracts](https://github.com/OpenZeppelin/stellar-contracts) library.
+Share-based vault contracts for [Stellar](https://stellar.org) Soroban, built on the [OpenZeppelin Stellar Contracts](https://github.com/OpenZeppelin/stellar-contracts) library.
 
-Users deposit a Stellar asset into the vault and receive shares proportional to their ownership. The contract follows the [ERC-4626 Tokenized Vault Standard](https://eips.ethereum.org/EIPS/eip-4626) pattern.
+Users deposit a Stellar asset into the vault and receive shares proportional to their ownership, following the [ERC-4626 Tokenized Vault Standard](https://eips.ethereum.org/EIPS/eip-4626) pattern. An operator deploys vault funds to external strategies (subject to per-update AUM rate limits), while the deployer/admin manages configuration.
 
----
+This repository contains two contracts:
+
+- **`august-vault`** — the core ERC-4626-style tokenized vault.
+- **`xlm-strategy`** — a strategy contract that receives funds deployed by the vault operator.
 
 ## Features
 
 - Accepts a single configurable deposit token (Stellar asset or SAC), set at deployment
 - Users receive shares for deposits and burn shares for withdrawals
-- Configurable virtual decimals offset for inflation attack protection
-- Share/asset conversion functions for UI integration
+- Configurable virtual decimals offset for inflation-attack protection
+- Operator-managed strategy deployment with bounded AUM increase/decrease limits
+- Share/asset conversion and preview functions for UI integration
 - Automatic instance TTL extension on every deposit, mint, withdraw, and redeem
 - Built on OpenZeppelin's `stellar-tokens` library
 
----
-
 ## Architecture
 
-The contract is a thin wrapper around OpenZeppelin's `stellar-tokens` vault library, implementing the `FungibleToken` and `FungibleVault` traits:
+The vault is a thin wrapper around OpenZeppelin's `stellar-tokens` vault library, implementing the `FungibleToken` and `FungibleVault` traits:
 
 ```
 ┌─────────────────────────────────┐
-│         August Vault            │
+│        august-vault             │
 │    (FungibleToken + Vault)      │
 ├─────────────────────────────────┤
 │  Constructor args:              │
@@ -35,8 +37,6 @@ The contract is a thin wrapper around OpenZeppelin's `stellar-tokens` vault libr
 │  stellar-tokens::vault::Vault   │
 └─────────────────────────────────┘
 ```
-
----
 
 ## Contract Interface
 
@@ -77,13 +77,11 @@ The contract is a thin wrapper around OpenZeppelin's `stellar-tokens` vault libr
 | --- | --- |
 | `extend_ttl()` | Extends the contract instance TTL to prevent expiration (permissionless, fallback for quiet periods) |
 
----
-
 ## Development
 
 ### Prerequisites
 
-- [Rust](https://rustup.rs/) (stable, with `wasm32-unknown-unknown` target)
+- [Rust](https://rustup.rs/) (stable, with the `wasm32-unknown-unknown` target)
 - [Stellar CLI](https://developers.stellar.org/docs/tools/developer-tools/cli/install-cli) (for deployment and optimization)
 
 ```bash
@@ -120,20 +118,11 @@ cargo test test_vault_deposit -- --nocapture
 ### Lint
 
 ```bash
-# Check formatting
-make fmt
-
-# Fix formatting
-make fmt-fix
-
-# Run clippy
-make clippy
-
-# Run all checks (fmt + clippy + test + build)
-make check
+make fmt       # Check formatting
+make fmt-fix   # Fix formatting
+make clippy    # Run clippy
+make check     # Run all checks (fmt + clippy + test + build)
 ```
-
----
 
 ## Deployment
 
@@ -166,6 +155,7 @@ stellar keys add deployer --secret-key
 ```
 
 Deploy script parameters:
+
 - **network**: `testnet` or `mainnet`
 - **source**: Stellar identity name
 - **asset**: Contract address of the underlying token
@@ -193,9 +183,15 @@ Deploy script parameters:
 ./scripts/upgrade.sh --vault <VAULT_ID> --network testnet --source deployer
 ```
 
-For the full deployment parameters and upgrade procedure, see the script usage in [Deployment](#deployment) above and the inline `--help` for each script in `scripts/`.
+## Security
 
----
+- **Operator trust**: The operator can deploy vault funds to external strategies and report deployed balances. These trust assumptions are critical to the vault's solvency.
+- **AUM rate limits**: Per-update increase/decrease limits (basis points) bound how much reported AUM can move in a single settlement, mitigating manipulation of the share price.
+- **Inflation-attack protection**: A configurable virtual `decimals_offset` defends against the classic first-depositor share-inflation attack.
+- **Upgrade authority**: The contract is upgradeable via WASM replacement; the upgrade authority should be transferred to an admin multisig after production deployment.
+- **Instance TTL**: State entries extend their TTL on every state-changing call; `extend_ttl()` is a permissionless fallback to keep the instance alive during quiet periods.
+
+This code is provided as-is. Review the source and your own deployment parameters before using it with real funds. To report a security issue, please contact the maintainers rather than opening a public issue.
 
 ## Project Structure
 
@@ -237,3 +233,7 @@ stellar-upshift-vault-contracts/
 ├── rust-toolchain.toml             # Rust toolchain configuration
 └── README.md
 ```
+
+## License
+
+Business Source License 1.1 — see [LICENSE](LICENSE). The Licensed Work converts to the Apache License, Version 2.0 on the change date specified in the license.
