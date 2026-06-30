@@ -25,6 +25,11 @@ jobs:
     changes:
         name: Detect changes
         runs-on: ubuntu-latest
+        # paths-filter reads the PR's changed files via the API, which needs
+        # pull-requests: read (the org's default GITHUB_TOKEN doesn't grant it).
+        permissions:
+            contents: read
+            pull-requests: read
         outputs:
             code: ${{ steps.filter.outputs.code }}
         steps:
