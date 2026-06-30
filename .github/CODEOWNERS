@@ -1,0 +1,11 @@
+# Code owners for stellar-upshift-vault-contracts
+#
+# These owners are automatically requested for review on any pull request,
+# and branch protection on `main` requires at least one approving review
+# from a code owner before a PR can be merged.
+#
+# Add more individuals or a team (e.g. @upshift-protocol/engineering) so that
+# review is not bottlenecked on a single person — a PR's author cannot approve
+# their own PR, so at least two code owners are needed for self-service merges.
+
+* @gr-august

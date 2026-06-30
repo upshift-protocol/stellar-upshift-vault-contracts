@@ -1,0 +1,28 @@
+[package]
+name = "august-vault"
+version = "0.1.0"
+edition = "2021"
+description = "Share-based vault contract for Stellar Soroban"
+license = "MIT"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+doctest = false
+
+[dependencies]
+soroban-sdk = { workspace = true }
+stellar-tokens = { workspace = true }
+stellar-contract-utils = { workspace = true }
+stellar-macros = { workspace = true }
+
+[dev-dependencies]
+soroban-sdk = { workspace = true, features = ["testutils"] }
+# Real strategy implementation used in cross-contract integration tests
+# (F1 share-price-invariant-under-donation, D3). Pulled in as a dev-dep
+# only so the vault's production build does not link the strategy crate.
+xlm-strategy = { path = "../xlm-strategy" }
+# Property-based randomized testing for share-price math invariants
+# (rounding direction + round-trip). See the "Math properties" section at
+# the bottom of `src/test.rs`.
+proptest = "1.6"
