@@ -1,0 +1,23 @@
+[workspace]
+members = ["contracts/*"]
+resolver = "2"
+
+[workspace.dependencies]
+soroban-sdk = "25.0.2"
+stellar-tokens = { git = "https://github.com/OpenZeppelin/stellar-contracts", rev = "606ec84" }
+stellar-contract-utils = { git = "https://github.com/OpenZeppelin/stellar-contracts", rev = "606ec84" }
+stellar-macros = { git = "https://github.com/OpenZeppelin/stellar-contracts", rev = "606ec84" }
+
+[profile.release]
+opt-level = "z"
+overflow-checks = true
+debug = 0
+strip = "symbols"
+debug-assertions = false
+panic = "abort"
+codegen-units = 1
+lto = true
+
+[profile.release-with-logs]
+inherits = "release"
+debug-assertions = true

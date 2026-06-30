@@ -1,0 +1,22 @@
+[package]
+name = "xlm-strategy"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+publish = false
+
+[lib]
+# `rlib` in addition to `cdylib` lets other crates in the workspace
+# (notably `august-vault`'s integration tests) import the contract type
+# directly for cross-contract test setups.
+crate-type = ["cdylib", "rlib"]
+doctest = false
+
+[dependencies]
+soroban-sdk = { workspace = true }
+
+[dev-dependencies]
+soroban-sdk = { workspace = true, features = ["testutils"] }
+stellar-tokens = { workspace = true }
+stellar-contract-utils = { workspace = true }
+stellar-macros = { workspace = true }
