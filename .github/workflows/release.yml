@@ -1,43 +1,162 @@
 name: Release & Attest
 
-# Push a version tag (e.g. `git tag v0.1.0 && git push origin v0.1.0`) to, for
-# each contract:
-#   - build the optimized WASM with the pinned Stellar CLI,
-#   - publish it as a GitHub release asset,
-#   - create a GitHub build attestation binding the WASM hash to this repo + commit,
-#   - register the hash with stellar.expert's contract-validation API, and
-#   - embed a `source_repo` tag into the WASM.
+# Push a version tag (e.g. `git tag v0.1.0 && git push origin v0.1.0`) to build,
+# publish, attest, and register each contract with stellar.expert. Any on-chain
+# contract instance whose WASM hash is attested here then shows as source-verified
+# on stellar.expert automatically. See VERIFY.md to reproduce a hash locally.
 #
-# Any on-chain contract instance running an attested WASM hash then shows as
-# source-verified on stellar.expert automatically — so new vaults deployed
-# (from anywhere) against this attested bytecode are verified with no per-vault
-# action. See VERIFY.md for reproducing a hash locally.
+# This is a hardened, self-contained build. It intentionally does NOT call the
+# upstream stellar-expert/soroban-build-workflow so that every step and nested
+# action is pinned and controlled here.
 
 on:
     push:
         tags:
             - "v*"
 
-permissions:
-    id-token: write
-    contents: write
-    attestations: write
+# No workflow-level permissions: each job requests the minimum it needs.
 
 jobs:
-    august-vault:
-        # Pinned to a reviewed commit (tag v25.1.0) instead of @main for
-        # supply-chain safety; bump deliberately after reviewing upstream changes.
-        uses: stellar-expert/soroban-build-workflow/.github/workflows/release.yml@e43b241f114bcf02151c30d61088506c6ad3ae0b # v25.1.0
-        with:
-            release_name: ${{ github.ref_name }}
-            package: august-vault
-        secrets:
-            release_token: ${{ secrets.GITHUB_TOKEN }}
+    # Finding #1: only publish/attest commits that are on `main` AND passed CI.
+    guard:
+        name: Guard — commit on main + CI green
+        runs-on: ubuntu-latest
+        permissions:
+            contents: read
+            checks: read
+        env:
+            GH_TOKEN: ${{ github.token }}
+            REPO: ${{ github.repository }}
+            SHA: ${{ github.sha }}
+        steps:
+            - name: Require the tagged commit to be on main
+              run: |
+                  set -euo pipefail
+                  status=$(gh api "repos/$REPO/compare/main...$SHA" --jq '.status')
+                  echo "compare main...$SHA => $status"
+                  case "$status" in
+                    identical|behind) echo "Tagged commit is on main." ;;
+                    *) echo "::error::Refusing to release: tagged commit $SHA is not on main (status=$status)."; exit 1 ;;
+                  esac
 
-    xlm-strategy:
-        uses: stellar-expert/soroban-build-workflow/.github/workflows/release.yml@e43b241f114bcf02151c30d61088506c6ad3ae0b # v25.1.0
-        with:
-            release_name: ${{ github.ref_name }}
-            package: xlm-strategy
-        secrets:
-            release_token: ${{ secrets.GITHUB_TOKEN }}
+            - name: Require CI ("CI Pass") to have succeeded for the tagged commit
+              run: |
+                  set -euo pipefail
+                  concl=$(gh api "repos/$REPO/commits/$SHA/check-runs" \
+                    --jq '[.check_runs[] | select(.name=="CI Pass")] | last | .conclusion // "missing"')
+                  echo "CI Pass conclusion for $SHA: $concl"
+                  if [ "$concl" != "success" ]; then
+                    echo "::error::Refusing to release: required check 'CI Pass' is '$concl' for $SHA."
+                    exit 1
+                  fi
+
+    build:
+        name: Build & attest (${{ matrix.package }})
+        needs: guard
+        runs-on: ubuntu-latest
+        permissions:
+            id-token: write # OIDC, for the build attestation
+            contents: write # create the GitHub release
+            attestations: write # write the build attestation
+        strategy:
+            fail-fast: false
+            matrix:
+                package: [august-vault, xlm-strategy]
+        env:
+            GH_TOKEN: ${{ github.token }}
+            REPO: ${{ github.repository }}
+            SHA: ${{ github.sha }}
+            TAG: ${{ github.ref_name }}
+            SERVER_URL: ${{ github.server_url }}
+            RUN_ID: ${{ github.run_id }}
+            PACKAGE: ${{ matrix.package }}
+            # Finding #3: pin the compiler. RUSTUP_TOOLCHAIN overrides rust-toolchain.toml
+            # for this build, so the attested hash is reproducible across Rust releases.
+            RUSTUP_TOOLCHAIN: "1.95.0"
+        steps:
+            - name: Checkout the tagged commit
+              uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+              with:
+                  ref: ${{ github.sha }}
+
+            - name: Install pinned Rust 1.95.0 + wasm target
+              run: |
+                  set -euo pipefail
+                  rustup toolchain install 1.95.0 --profile minimal
+                  rustup target add wasm32v1-none --toolchain 1.95.0
+                  rustc +1.95.0 --version
+
+            - name: Install Stellar CLI 25.1.0 (pinned .deb)
+              run: |
+                  set -euo pipefail
+                  curl -fsSL -o /tmp/stellar-cli.deb \
+                    https://github.com/stellar/stellar-cli/releases/download/v25.1.0/stellar-cli_25.1.0_amd64.deb
+                  sudo dpkg -i /tmp/stellar-cli.deb
+                  rm /tmp/stellar-cli.deb
+                  stellar --version
+
+            - name: Build (optimized) and compute hash
+              id: build
+              run: |
+                  set -euo pipefail
+                  OUT="$(mktemp -d)"
+                  stellar contract build --optimize \
+                    --package "$PACKAGE" \
+                    --out-dir "$OUT" \
+                    --meta source_repo="github:$REPO"
+                  VER=$(cargo metadata --format-version=1 --no-deps \
+                    | jq -r --arg p "$PACKAGE" '.packages[] | select(.name==$p) | .version')
+                  [ -n "$VER" ] || { echo "::error::could not resolve version for $PACKAGE"; exit 1; }
+                  SRC=$(find "$OUT" -name '*.wasm' | head -1)
+                  [ -n "$SRC" ] || { echo "::error::no wasm produced for $PACKAGE"; exit 1; }
+                  NAME="${PACKAGE}_v${VER}.wasm"
+                  cp "$SRC" "$OUT/$NAME"
+                  HASH=$(sha256sum "$OUT/$NAME" | cut -d' ' -f1)
+                  echo "Built $NAME ($(wc -c < "$OUT/$NAME") bytes) sha256=$HASH"
+                  {
+                    echo "wasm_path=$OUT/$NAME"
+                    echo "wasm_name=$NAME"
+                    echo "wasm_hash=$HASH"
+                  } >> "$GITHUB_OUTPUT"
+
+            - name: Create release at the tagged commit
+              env:
+                  WASM_PATH: ${{ steps.build.outputs.wasm_path }}
+                  WASM_HASH: ${{ steps.build.outputs.wasm_hash }}
+              run: |
+                  set -euo pipefail
+                  # Finding #2: --target pins the created tag (and its source archive)
+                  # to the exact commit that produced the attested WASM.
+                  gh release create "${TAG}-${PACKAGE}" "$WASM_PATH" \
+                    --target "$SHA" \
+                    --title "${PACKAGE} ${TAG}" \
+                    --notes "Reproducible build of \`${PACKAGE}\` at commit \`${SHA}\`.
+                  WASM sha256: \`${WASM_HASH}\`. See VERIFY.md to reproduce."
+
+            - name: Attest build provenance
+              uses: actions/attest-build-provenance@ef244123eb79f2f7a7e75d99086184180e6d0018 # v1.4.4
+              with:
+                  subject-path: ${{ steps.build.outputs.wasm_path }}
+                  subject-name: ${{ steps.build.outputs.wasm_name }}
+
+            - name: Register with stellar.expert (fail loud)
+              env:
+                  WASM_HASH: ${{ steps.build.outputs.wasm_hash }}
+              run: |
+                  set -euo pipefail
+                  payload=$(jq -nc \
+                    --arg repository "$SERVER_URL/$REPO" \
+                    --arg commitHash "$SHA" \
+                    --arg jobId "build" \
+                    --arg runId "$RUN_ID" \
+                    --arg contractHash "$WASM_HASH" \
+                    --arg packageName "$PACKAGE" \
+                    '{repository:$repository, commitHash:$commitHash, jobId:$jobId, runId:$runId, contractHash:$contractHash, packageName:$packageName}')
+                  echo "Registering with stellar.expert: $payload"
+                  # Finding #4: --fail-with-body turns HTTP 4xx/5xx into a job failure
+                  # instead of a silent green run with no registered validation.
+                  curl --fail-with-body -sS -X POST \
+                    "https://api.stellar.expert/explorer/public/contract-validation/match" \
+                    -H "Content-Type: application/json" \
+                    -d "$payload" \
+                    --max-time 30
