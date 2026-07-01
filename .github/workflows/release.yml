@@ -50,18 +50,24 @@ jobs:
                     *) echo "::error::Refusing to release: tagged commit $SHA is not on main (status=$status)."; exit 1 ;;
                   esac
 
-            - name: Require the ci.yml push run to have succeeded for this commit
+            - name: Require CI's real build/test jobs to have succeeded for this commit
               run: |
                   set -euo pipefail
                   # Bind to the specific workflow file + push event, not just a check
                   # named "CI Pass" (which any push-access user could otherwise spoof).
-                  n=$(gh api "repos/$REPO/actions/workflows/ci.yml/runs?head_sha=$SHA&event=push&status=completed&per_page=100" \
-                    --jq '[.workflow_runs[] | select(.conclusion=="success")] | length')
-                  echo "successful ci.yml (push) runs for $SHA: ${n:-0}"
-                  if [ "${n:-0}" -lt 1 ]; then
-                    echo "::error::Refusing to release: no successful ci.yml (push) run for $SHA."
-                    exit 1
-                  fi
+                  run_id=$(gh api "repos/$REPO/actions/workflows/ci.yml/runs?head_sha=$SHA&event=push&status=completed&per_page=100" \
+                    --jq 'first(.workflow_runs[] | select(.conclusion=="success") | .id) // empty')
+                  [ -n "$run_id" ] || { echo "::error::Refusing to release: no successful ci.yml (push) run for $SHA."; exit 1; }
+                  echo "ci.yml push run: $run_id"
+                  # A green run is NOT sufficient: ci.yml skips build/test/e2e on docs-only
+                  # diffs and its aggregator counts skips as success. Require the real
+                  # build/test/lint jobs to have actually concluded success for this commit.
+                  jobs=$(gh api "repos/$REPO/actions/runs/$run_id/jobs?per_page=100")
+                  for job in "Build & Test" "E2E Tests" "Clippy"; do
+                    c=$(printf '%s' "$jobs" | jq -r --arg j "$job" 'first(.jobs[] | select(.name==$j) | .conclusion) // "missing"')
+                    echo "  ci job '$job': $c"
+                    [ "$c" = "success" ] || { echo "::error::Refusing to release: ci.yml job '$job' was '$c' (need success) for $SHA."; exit 1; }
+                  done
 
     build:
         name: Build (unprivileged) — ${{ matrix.package }}
@@ -108,8 +114,10 @@ jobs:
             - name: Build (optimized, locked)
               run: |
                   set -euo pipefail
-                  # --locked fails if Cargo.lock isn't consistent with the tagged source,
-                  # so the runner can't silently resolve a different dependency graph.
+                  # Lockfile enforced two ways: `cargo metadata --locked` fails if Cargo.lock
+                  # is inconsistent with the tagged source *before* building, and the
+                  # `git diff` after the build fails if the build mutated it. Both matter
+                  # because `stellar contract build` has no --locked passthrough to cargo.
                   VER=$(cargo metadata --format-version=1 --no-deps --locked \
                     | jq -r --arg p "$PACKAGE" '.packages[] | select(.name==$p) | .version')
                   [ -n "$VER" ] || { echo "::error::could not resolve version for $PACKAGE"; exit 1; }
@@ -119,8 +127,9 @@ jobs:
                     --package "$PACKAGE" \
                     --out-dir "$OUT" \
                     --meta source_repo="github:$REPO"
-                  SRC=$(find "$OUT" -name '*.wasm' | head -1)
-                  [ -n "$SRC" ] || { echo "::error::no wasm produced for $PACKAGE"; exit 1; }
+                  n=$(find "$OUT" -name '*.wasm' | wc -l | tr -d ' ')
+                  [ "$n" -eq 1 ] || { echo "::error::expected exactly one wasm in $OUT, found $n"; exit 1; }
+                  SRC=$(find "$OUT" -name '*.wasm')
                   NAME="${PACKAGE}_v${VER}.wasm"
                   [ "$(basename "$SRC")" = "$NAME" ] || mv "$SRC" "$OUT/$NAME"
                   # Belt-and-suspenders: fail if the build mutated the lockfile.
@@ -168,8 +177,9 @@ jobs:
               id: art
               run: |
                   set -euo pipefail
-                  WASM=$(find dist -name '*.wasm' | head -1)
-                  [ -n "$WASM" ] || { echo "::error::artifact wasm missing"; exit 1; }
+                  n=$(find dist -name '*.wasm' | wc -l | tr -d ' ')
+                  [ "$n" -eq 1 ] || { echo "::error::expected exactly one wasm in artifact, found $n"; exit 1; }
+                  WASM=$(find dist -name '*.wasm')
                   HASH=$(sha256sum "$WASM" | cut -d' ' -f1)
                   {
                     echo "path=$WASM"
@@ -195,33 +205,55 @@ jobs:
                   # matches the protected `v*` ruleset nor re-triggers this workflow.
                   REL="${PACKAGE}-${TAG}"
                   NOTES="Reproducible build of ${PACKAGE} at ${SHA} (target wasm32v1-none, Rust 1.95.0, Stellar CLI 25.1.0, --meta source_repo=github:${REPO}). WASM sha256: ${WASM_HASH}. Reproduce: check out ${SHA} and follow section B of VERIFY.md. Vaults are upgradeable — verification is point-in-time; re-fetch the current on-chain hash."
-                  if gh release view "$REL" >/dev/null 2>&1; then
-                    # The tag must point at exactly this commit, else the (immutable)
-                    # source archive would disagree with the asset/attestation.
-                    existing_sha=$(gh api "repos/$REPO/commits/$REL" --jq '.sha' 2>/dev/null || echo "")
-                    [ "$existing_sha" = "$SHA" ] || { echo "::error::release $REL tag points to '${existing_sha:-unknown}', not $SHA"; exit 1; }
-                    # Never clobber published bytes. Compare the existing asset's digest:
-                    # skip if identical, fail if different, upload only if missing.
-                    tmp=$(mktemp -d)
-                    if gh release download "$REL" --pattern "$WASM_NAME" --dir "$tmp" 2>/dev/null; then
-                      pub=$(sha256sum "$tmp/$WASM_NAME" | cut -d' ' -f1)
-                      if [ "$pub" = "$WASM_HASH" ]; then
-                        echo "Asset already published with matching hash — nothing to do."
-                      else
-                        echo "::error::published asset hash $pub != $WASM_HASH; refusing to replace published bytes"; exit 1
-                      fi
-                    else
-                      echo "Release exists but asset missing — uploading (no clobber)."
-                      gh release upload "$REL" "$WASM_PATH"
-                    fi
-                  else
-                    # --target pins the created tag (and its source archive) to the exact
-                    # commit that produced the attested WASM.
-                    gh release create "$REL" "$WASM_PATH" \
-                      --target "$SHA" \
-                      --title "${PACKAGE} ${TAG}" \
-                      --notes "$NOTES"
+
+                  # If the derived tag already exists it MUST point at exactly this commit:
+                  # `gh release create` reuses an existing tag and --target does NOT retarget
+                  # it, so a stray tag pointing elsewhere would bind this release/asset to the
+                  # wrong source archive. matching-refs returns 200 + an array (no 404
+                  # ambiguity); peel annotated tags to their commit.
+                  match=$(gh api "repos/$REPO/git/matching-refs/tags/$REL" \
+                    | jq -c --arg r "refs/tags/$REL" 'first(.[] | select(.ref==$r) | .object) // {}')
+                  otype=$(printf '%s' "$match" | jq -r '.type // ""')
+                  osha=$(printf '%s' "$match" | jq -r '.sha // ""')
+                  if [ -n "$osha" ]; then
+                    [ "$otype" != "tag" ] || osha=$(gh api "repos/$REPO/git/tags/$osha" --jq '.object.sha')
+                    [ "$osha" = "$SHA" ] || { echo "::error::tag $REL already exists at $osha, not $SHA — refusing to publish"; exit 1; }
                   fi
+
+                  # Release/asset state. A 404 (no release for this tag) is expected and
+                  # distinct from "release exists, asset absent".
+                  if rel=$(gh api "repos/$REPO/releases/tags/$REL" 2>/dev/null); then
+                    asset=$(printf '%s' "$rel" | jq -r --arg n "$WASM_NAME" 'if any((.assets // [])[]; .name==$n) then "present" else "absent" end')
+                  else
+                    asset="norelease"
+                  fi
+                  case "$asset" in
+                    present)
+                      # Never clobber: the published bytes must already equal our hash.
+                      tmp=$(mktemp -d)
+                      gh release download "$REL" --pattern "$WASM_NAME" --dir "$tmp"
+                      pub=$(sha256sum "$tmp/$WASM_NAME" | cut -d' ' -f1)
+                      [ "$pub" = "$WASM_HASH" ] || { echo "::error::published asset $pub != $WASM_HASH; refusing to replace"; exit 1; }
+                      echo "Asset already published with matching hash." ;;
+                    absent)
+                      echo "Release exists (tag verified at $SHA), asset missing — uploading."
+                      gh release upload "$REL" "$WASM_PATH" ;;
+                    *)
+                      # --target creates the tag at this commit (any pre-existing tag was
+                      # already verified == $SHA above).
+                      gh release create "$REL" "$WASM_PATH" \
+                        --target "$SHA" \
+                        --title "${PACKAGE} ${TAG}" \
+                        --notes "$NOTES" ;;
+                  esac
+
+                  # Read back the published asset and confirm it matches the attested hash
+                  # (catches a corrupted/truncated upload that still exited 0).
+                  vrf=$(mktemp -d)
+                  gh release download "$REL" --pattern "$WASM_NAME" --dir "$vrf"
+                  got=$(sha256sum "$vrf/$WASM_NAME" | cut -d' ' -f1)
+                  [ "$got" = "$WASM_HASH" ] || { echo "::error::published asset $got != attested $WASM_HASH"; exit 1; }
+                  echo "Verified published asset matches attested hash $WASM_HASH."
 
             - name: Register with stellar.expert (fail loud)
               env:
@@ -239,10 +271,19 @@ jobs:
                   echo "Enqueuing stellar.expert validation: $payload"
                   # Registration is asynchronous — the endpoint queues the request and
                   # returns {ok:1}; the asset is already published above so the worker can
-                  # find it. --fail-with-body still surfaces transport/HTTP errors. Final
-                  # validation state is confirmed on stellar.expert once the worker runs.
-                  curl --fail-with-body -sS -X POST \
+                  # find it. We assert BOTH the HTTP status (via --fail-with-body) AND the
+                  # application-level {ok:1}, so a 200 carrying {ok:0}/an error body fails
+                  # loudly instead of passing green. Final validation is confirmed on
+                  # stellar.expert once the async worker runs.
+                  set +e
+                  resp=$(curl --fail-with-body -sS -X POST \
                     "https://api.stellar.expert/explorer/public/contract-validation/match" \
                     -H "Content-Type: application/json" \
                     -d "$payload" \
-                    --max-time 30
+                    --max-time 30)
+                  rc=$?
+                  set -e
+                  echo "HTTP rc=$rc response: $resp"
+                  [ "$rc" -eq 0 ] || { echo "::error::stellar.expert POST failed (curl rc=$rc): $resp"; exit 1; }
+                  ok=$(printf '%s' "$resp" | jq -r '.ok // empty')
+                  [ "$ok" = "1" ] || { echo "::error::stellar.expert did not accept the registration (ok=${ok:-none}): $resp"; exit 1; }

@@ -68,8 +68,10 @@ stellar contract info meta --wasm onchain.wasm # binver 0.1.0, rsver 1.95.0, rss
 ```
 
 > These vaults predate the `Release & Attest` workflow, so they carry no
-> `source_repo` metadata and can't get the stellar.expert auto-badge without a
-> redeploy — this manual reproduction is their verification.
+> `source_repo` metadata and can't get the stellar.expert auto-badge without
+> either a redeploy **or an upgrade to an attested build** (the vault is
+> upgradeable via WASM replacement) — meanwhile this manual reproduction is
+> their verification.
 
 ---
 
@@ -115,6 +117,11 @@ This should match the hash in the release notes, the GitHub build attestation
 (`https://github.com/upshift-protocol/stellar-upshift-vault-contracts/attestations`),
 and the WASM hash of any vault deployed against it — which then shows as verified
 on stellar.expert.
+
+> **Filename note:** compare by **hash**, not filename. Your local build emits
+> `out/august_vault.wasm` (Cargo's underscore name), while the published release
+> asset is renamed to `<package>_v<version>.wasm` (e.g. `august-vault_v0.1.0.wasm`).
+> Same bytes, different name — only the SHA-256 is authoritative.
 
 ---
 
