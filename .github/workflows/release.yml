@@ -124,30 +124,8 @@ jobs:
                     echo "wasm_hash=$HASH"
                   } >> "$GITHUB_OUTPUT"
 
-            - name: Publish release at the tagged commit (idempotent)
-              env:
-                  WASM_PATH: ${{ steps.build.outputs.wasm_path }}
-                  WASM_HASH: ${{ steps.build.outputs.wasm_hash }}
-              run: |
-                  set -euo pipefail
-                  REL="${TAG}-${PACKAGE}"
-                  # Finding #1: point to the attested-release recipe (wasm32v1-none + source_repo
-                  # meta) — NOT the legacy recipe — so following the note reproduces THIS hash.
-                  NOTES="Reproducible build of ${PACKAGE} at ${SHA} (target wasm32v1-none, Rust 1.95.0, Stellar CLI 25.1.0, --meta source_repo=github:${REPO}). WASM sha256: ${WASM_HASH}. Reproduce: see section B ('Verify an attested release build') in VERIFY.md."
-                  # Finding #2: retry-safe. If a later step (attest/register) fails and the job
-                  # is rerun, don't fail here just because the release already exists.
-                  if gh release view "$REL" >/dev/null 2>&1; then
-                    echo "Release $REL already exists — re-uploading asset."
-                    gh release upload "$REL" "$WASM_PATH" --clobber
-                  else
-                    # --target pins the created tag (and its source archive) to the exact
-                    # commit that produced the attested WASM.
-                    gh release create "$REL" "$WASM_PATH" \
-                      --target "$SHA" \
-                      --title "${PACKAGE} ${TAG}" \
-                      --notes "$NOTES"
-                  fi
-
+            # Attestation and registration run BEFORE publishing, so a public
+            # release is only ever created once its provenance flow is complete.
             - name: Attest build provenance
               uses: actions/attest-build-provenance@ef244123eb79f2f7a7e75d99086184180e6d0018 # v1.4.4
               with:
@@ -168,10 +146,39 @@ jobs:
                     --arg packageName "$PACKAGE" \
                     '{repository:$repository, commitHash:$commitHash, jobId:$jobId, runId:$runId, contractHash:$contractHash, packageName:$packageName}')
                   echo "Registering with stellar.expert: $payload"
-                  # Finding #4: --fail-with-body turns HTTP 4xx/5xx into a job failure
-                  # instead of a silent green run with no registered validation.
+                  # Finding (prior #4): --fail-with-body turns HTTP 4xx/5xx into a job
+                  # failure instead of a silent green run with no registered validation.
                   curl --fail-with-body -sS -X POST \
                     "https://api.stellar.expert/explorer/public/contract-validation/match" \
                     -H "Content-Type: application/json" \
                     -d "$payload" \
                     --max-time 30
+
+            # Published LAST: only after the build is attested and registered, so a
+            # public release always reflects a completed provenance flow (#2).
+            - name: Publish release at the tagged commit (idempotent)
+              env:
+                  WASM_PATH: ${{ steps.build.outputs.wasm_path }}
+                  WASM_HASH: ${{ steps.build.outputs.wasm_hash }}
+              run: |
+                  set -euo pipefail
+                  REL="${TAG}-${PACKAGE}"
+                  NOTES="Reproducible build of ${PACKAGE} at ${SHA} (target wasm32v1-none, Rust 1.95.0, Stellar CLI 25.1.0, --meta source_repo=github:${REPO}). WASM sha256: ${WASM_HASH}. Reproduce: check out ${SHA} and follow section B ('Verify an attested release build') in VERIFY.md."
+                  if gh release view "$REL" >/dev/null 2>&1; then
+                    # #1: never overwrite a release whose tag points at a different commit —
+                    # otherwise the (immutable) source archive would disagree with the asset.
+                    existing=$(gh api "repos/$REPO/commits/$REL" --jq '.sha' 2>/dev/null || echo "")
+                    if [ "$existing" != "$SHA" ]; then
+                      echo "::error::Release $REL exists but its tag points to '${existing:-unknown}', not $SHA. Refusing to overwrite."
+                      exit 1
+                    fi
+                    echo "Release $REL already exists at $SHA — re-uploading asset."
+                    gh release upload "$REL" "$WASM_PATH" --clobber
+                  else
+                    # --target pins the created tag (and its source archive) to the exact
+                    # commit that produced the attested WASM.
+                    gh release create "$REL" "$WASM_PATH" \
+                      --target "$SHA" \
+                      --title "${PACKAGE} ${TAG}" \
+                      --notes "$NOTES"
+                  fi

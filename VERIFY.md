@@ -32,6 +32,10 @@ Both live vaults run the **same** `august-vault` bytecode, built for
 Reproduce:
 
 ```bash
+# These vaults are immutable. Build from the repo revision that matches the
+# on-chain metadata (rsver 1.95.0, rssdkver 25.1.1) — the initial published
+# commit reproduces the current deployment. Check out that commit first if the
+# repository has since advanced.
 rustup toolchain install 1.95.0
 rustup target add wasm32-unknown-unknown --toolchain 1.95.0
 
@@ -72,10 +76,17 @@ build new vaults deploy, and it hashes **differently** from the legacy profile �
 so use this recipe (not profile A) to reproduce a release/attestation hash.
 
 ```bash
+# 1. Check out the EXACT revision the release was built from — otherwise you'll
+#    hash whatever you currently have checked out. Both are in the release notes:
+#    the commit SHA, and the tag <version>-<package>.
+git checkout v0.1.0-august-vault        # or: git checkout <commit-from-release-notes>
+
+# 2. Install the pinned toolchain + target
 rustup toolchain install 1.95.0
 rustup target add wasm32v1-none --toolchain 1.95.0
 
-# Same command the release workflow runs (source_repo makes the hash repo-specific)
+# 3. Run the same command the release workflow runs (source_repo makes the hash
+#    repo-specific, so keep it exactly as below)
 RUSTUP_TOOLCHAIN=1.95.0 stellar contract build --optimize \
   --package august-vault \
   --out-dir out \
