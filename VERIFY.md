@@ -78,50 +78,54 @@ stellar contract info meta --wasm onchain.wasm # binver 0.1.0, rsver 1.95.0, rss
 ## B — Verify an attested release build (new vaults)
 
 The `Release & Attest` workflow (`.github/workflows/release.yml`) builds each
-contract for the default **`wasm32v1-none`** target and embeds a **`source_repo`**
-tag, then attests the result and registers it with stellar.expert. This is the
-build new vaults deploy, and it hashes **differently** from the legacy profile —
-so use this recipe (not profile A) to reproduce a release/attestation hash.
+contract for the **`wasm32v1-none`** target with a **`source_repo`** tag, attests
+the result, and registers it with stellar.expert. This is the build new vaults
+deploy; it hashes **differently** from the legacy profile A.
+
+> **Reproduce in the pinned container.** WASM output is platform-sensitive — a
+> bare build on a different host (e.g. macOS/arm64) yields different bytes. The
+> release is built on Linux **x86_64**; the `linux/amd64` `rust:1.95.0` container
+> below reproduces that platform on any host and yields the attested hashes
+> **byte-for-byte** (verified against the v0.1.0 release).
 
 ```bash
-# 1. Check out the EXACT revision the release was built from — otherwise you'll
-#    hash whatever you currently have checked out. The release is published on the
-#    version tag (e.g. v0.1.0); its notes also record the exact commit SHA.
-git checkout v0.1.0                     # or: git checkout <commit-from-release-notes>
+git clone https://github.com/upshift-protocol/stellar-upshift-vault-contracts
+cd stellar-upshift-vault-contracts
+git checkout v0.1.0        # the release tag (its notes also record the commit SHA)
 
-# 2. Install the pinned toolchain + target
-rustup toolchain install 1.95.0
-rustup target add wasm32v1-none --toolchain 1.95.0
-
-# 3. Enforce the committed lockfile (fails if Cargo.lock is inconsistent with the
-#    tagged source, so a different dependency graph can't be resolved silently)
-RUSTUP_TOOLCHAIN=1.95.0 cargo metadata --format-version=1 --no-deps --locked >/dev/null
-
-# 4. Run the same command the release workflow runs (source_repo makes the hash
-#    repo-specific, so keep it exactly as below)
-RUSTUP_TOOLCHAIN=1.95.0 stellar contract build --optimize \
-  --package august-vault \
-  --out-dir out \
-  --meta source_repo="github:upshift-protocol/stellar-upshift-vault-contracts"
-
-shasum -a 256 out/august_vault.wasm
+docker run --rm --platform linux/amd64 -v "$PWD:/src:ro" \
+  -e RUSTUP_TOOLCHAIN=1.95.0 rust:1.95.0 bash -c '
+    set -euo pipefail
+    apt-get update -qq && apt-get install -y -qq curl ca-certificates git >/dev/null
+    rustup target add wasm32v1-none
+    curl -fsSL -o /tmp/s.deb \
+      https://github.com/stellar/stellar-cli/releases/download/v25.1.0/stellar-cli_25.1.0_amd64.deb
+    echo "0260de467b29883c7cc227a3d8df7b7d8723805ffa54dcfe8171af1255de33c8  /tmp/s.deb" | sha256sum -c -
+    dpkg -i /tmp/s.deb 2>/dev/null || apt-get install -y -f -qq
+    git config --global --add safe.directory /src
+    mkdir /build && git -C /src archive HEAD | tar -x -C /build && cd /build
+    for p in august-vault xlm-strategy; do
+      stellar contract build --optimize --package "$p" --out-dir "/tmp/$p" \
+        --meta source_repo="github:upshift-protocol/stellar-upshift-vault-contracts"
+      sha256sum "/tmp/$p"/*.wasm
+    done
+  '
 ```
 
-For example, `august-vault` **v0.1.0** produces:
+For **v0.1.0** this reproduces the attested hashes exactly:
 
 ```
-f23d13a79d0903150bf2c32a482634c7dfe3f8828474b58e574ac6d5475d23b2   (92,025 bytes)
+august-vault:  3bd05dfa2bf65299d359e86a4672a45900e8c5768d9f056ad8da5ccd779bcd12   (92,025 bytes)
+xlm-strategy:  e3443e37b6da76ef061051f5e170537ef6e596711869c09a1ec9cd9e55345da4
 ```
 
-This should match the hash in the release notes, the GitHub build attestation
+These match the release assets, the GitHub build attestation
 (`https://github.com/upshift-protocol/stellar-upshift-vault-contracts/attestations`),
-and the WASM hash of any vault deployed against it — which then shows as verified
+and the WASM hash of any vault deployed against them — which then shows as verified
 on stellar.expert.
 
-> **Filename note:** compare by **hash**, not filename. Your local build emits
-> `out/august_vault.wasm` (Cargo's underscore name), while the published release
-> asset is renamed to `<package>_v<version>.wasm` (e.g. `august-vault_v0.1.0.wasm`).
-> Same bytes, different name — only the SHA-256 is authoritative.
+> **Filename note:** compare by **hash**, not filename — the published release asset
+> is `<package>_v<version>.wasm` (e.g. `august-vault_v0.1.0.wasm`).
 
 ---
 
