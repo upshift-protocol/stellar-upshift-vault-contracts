@@ -1,0 +1,43 @@
+name: Release & Attest
+
+# Push a version tag (e.g. `git tag v0.1.0 && git push origin v0.1.0`) to, for
+# each contract:
+#   - build the optimized WASM with the pinned Stellar CLI,
+#   - publish it as a GitHub release asset,
+#   - create a GitHub build attestation binding the WASM hash to this repo + commit,
+#   - register the hash with stellar.expert's contract-validation API, and
+#   - embed a `source_repo` tag into the WASM.
+#
+# Any on-chain contract instance running an attested WASM hash then shows as
+# source-verified on stellar.expert automatically — so new vaults deployed
+# (from anywhere) against this attested bytecode are verified with no per-vault
+# action. See VERIFY.md for reproducing a hash locally.
+
+on:
+    push:
+        tags:
+            - "v*"
+
+permissions:
+    id-token: write
+    contents: write
+    attestations: write
+
+jobs:
+    august-vault:
+        # Pinned to a reviewed commit (tag v25.1.0) instead of @main for
+        # supply-chain safety; bump deliberately after reviewing upstream changes.
+        uses: stellar-expert/soroban-build-workflow/.github/workflows/release.yml@e43b241f114bcf02151c30d61088506c6ad3ae0b # v25.1.0
+        with:
+            release_name: ${{ github.ref_name }}
+            package: august-vault
+        secrets:
+            release_token: ${{ secrets.GITHUB_TOKEN }}
+
+    xlm-strategy:
+        uses: stellar-expert/soroban-build-workflow/.github/workflows/release.yml@e43b241f114bcf02151c30d61088506c6ad3ae0b # v25.1.0
+        with:
+            release_name: ${{ github.ref_name }}
+            package: xlm-strategy
+        secrets:
+            release_token: ${{ secrets.GITHUB_TOKEN }}
