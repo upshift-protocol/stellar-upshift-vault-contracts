@@ -317,6 +317,64 @@ jobs:
                   retention-days: 5
 
     # ============================================
+    # Reproducible Build (enforce the attested hashes)
+    #
+    # Rebuilds each contract with the pinned RELEASE toolchain (Rust 1.95.0,
+    # Stellar CLI 25.1.0, wasm32v1-none, --meta source_repo) — the same build the
+    # release workflow attests — and asserts the sha256 matches reproducible-hashes.txt.
+    # CI runners are linux/amd64, so no container is needed here (that's only for
+    # reproducing on other hosts; see VERIFY.md § B). A bytecode change must update
+    # reproducible-hashes.txt in the same PR, or this fails.
+    # ============================================
+    reproducible-build:
+        name: Reproducible Build
+        runs-on: ubuntu-latest
+        needs: changes
+        if: needs.changes.outputs.code == 'true'
+        env:
+            RUSTUP_TOOLCHAIN: "1.95.0"
+            REPO: ${{ github.repository }}
+        steps:
+            - uses: actions/checkout@v4
+
+            - name: Install pinned Rust 1.95.0 + wasm target
+              run: |
+                  set -euo pipefail
+                  rustup toolchain install 1.95.0 --profile minimal
+                  rustup target add wasm32v1-none --toolchain 1.95.0
+
+            - name: Install Stellar CLI 25.1.0 (pinned .deb, checksum-verified)
+              env:
+                  STELLAR_CLI_DEB_SHA256: "0260de467b29883c7cc227a3d8df7b7d8723805ffa54dcfe8171af1255de33c8"
+              run: |
+                  set -euo pipefail
+                  curl -fsSL -o /tmp/stellar-cli.deb \
+                    https://github.com/stellar/stellar-cli/releases/download/v25.1.0/stellar-cli_25.1.0_amd64.deb
+                  echo "${STELLAR_CLI_DEB_SHA256}  /tmp/stellar-cli.deb" | sha256sum -c -
+                  sudo dpkg -i /tmp/stellar-cli.deb
+                  stellar --version
+
+            - name: Rebuild and assert expected hashes
+              run: |
+                  set -euo pipefail
+                  fail=0
+                  while read -r pkg expected _; do
+                    case "$pkg" in ''|\#*) continue ;; esac
+                    stellar contract build --optimize --package "$pkg" --out-dir "out-$pkg" \
+                      --meta source_repo="github:$REPO" >/dev/null
+                    n=$(find "out-$pkg" -name '*.wasm' | wc -l | tr -d ' ')
+                    [ "$n" -eq 1 ] || { echo "::error::$pkg: expected exactly one wasm, found $n"; fail=1; continue; }
+                    got=$(sha256sum "out-$pkg"/*.wasm | cut -d' ' -f1)
+                    if [ "$got" = "$expected" ]; then
+                      echo "✓ $pkg $got"
+                    else
+                      echo "::error::$pkg reproducible-hash mismatch: got $got, expected $expected. If this bytecode change is intentional, update reproducible-hashes.txt in this PR."
+                      fail=1
+                    fi
+                  done < reproducible-hashes.txt
+                  [ "$fail" -eq 0 ]
+
+    # ============================================
     # CI Pass (aggregator for branch protection)
     #
     # Always runs and reports, so it is a stable required status check even
@@ -327,7 +385,7 @@ jobs:
         name: CI Pass
         if: always()
         runs-on: ubuntu-latest
-        needs: [changes, fmt, clippy, typos, cargo-deny, shellcheck, test, e2e, coverage]
+        needs: [changes, fmt, clippy, typos, cargo-deny, shellcheck, test, e2e, coverage, reproducible-build]
         steps:
             - name: Check all jobs
               run: |
