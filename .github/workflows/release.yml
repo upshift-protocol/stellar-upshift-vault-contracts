@@ -87,6 +87,7 @@ jobs:
         env:
             REPO: ${{ github.repository }}
             PACKAGE: ${{ matrix.package }}
+            TAG: ${{ github.ref_name }}
             RUSTUP_TOOLCHAIN: "1.95.0" # pin the compiler
         steps:
             - name: Checkout the tagged commit (no persisted credentials)
@@ -133,7 +134,10 @@ jobs:
                   n=$(find "$OUT" -name '*.wasm' | wc -l | tr -d ' ')
                   [ "$n" -eq 1 ] || { echo "::error::expected exactly one wasm in $OUT, found $n"; exit 1; }
                   SRC=$(find "$OUT" -name '*.wasm')
-                  NAME="${PACKAGE}_v${VER}.wasm"
+                  # The release tag must equal the crate version (a mistagged release would
+                  # otherwise publish a wrong-version, permanently-immutable asset).
+                  [ "$TAG" = "v$VER" ] || { echo "::error::tag $TAG does not match $PACKAGE crate version v$VER"; exit 1; }
+                  NAME="${PACKAGE}_${TAG}.wasm"
                   [ "$(basename "$SRC")" = "$NAME" ] || mv "$SRC" "$OUT/$NAME"
                   # Belt-and-suspenders: fail if the build mutated the lockfile.
                   git diff --exit-code -- Cargo.lock
@@ -173,13 +177,23 @@ jobs:
                   path: dist
                   merge-multiple: true
 
-            - name: Resolve artifacts
+            - name: Resolve artifacts (enforce exact manifest)
               run: |
                   set -euo pipefail
-                  mapfile -t WASMS < <(find dist -name '*.wasm' | sort)
-                  [ "${#WASMS[@]}" -ge 1 ] || { echo "::error::no wasm artifacts downloaded"; exit 1; }
-                  printf '%s\n' "${WASMS[@]}" > "$RUNNER_TEMP/wasms.txt"
-                  for w in "${WASMS[@]}"; do sha256sum "$w"; done
+                  # The immutable release must contain EXACTLY these assets — no missing
+                  # (partial), no wrong-version, no extra. Keep this package set in sync
+                  # with the build matrix; a mismatch fails loudly below.
+                  PACKAGES=(august-vault xlm-strategy)
+                  EXPECTED=$(for p in "${PACKAGES[@]}"; do echo "${p}_${TAG}.wasm"; done | sort)
+                  GOT=$(find dist -name '*.wasm' -printf '%f\n' | sort)
+                  if [ "$GOT" != "$EXPECTED" ]; then
+                    echo "::error::downloaded assets do not match the required manifest."
+                    printf 'expected:\n%s\ngot:\n%s\n' "$EXPECTED" "$GOT"
+                    exit 1
+                  fi
+                  echo "$EXPECTED" > "$RUNNER_TEMP/manifest.txt"
+                  find dist -name '*.wasm' | sort > "$RUNNER_TEMP/wasms.txt"
+                  while read -r w; do sha256sum "$w"; done < "$RUNNER_TEMP/wasms.txt"
 
             # Attest before publishing, so a published release is always attested.
             - name: Attest build provenance (all artifacts)
@@ -230,6 +244,18 @@ jobs:
                     [ "$got" = "$want" ] || { echo "::error::published $name ($got) != built ($want)"; exit 1; }
                     echo "Verified $name matches $want."
                   done
+
+                  # The published release's COMPLETE asset set must equal the manifest —
+                  # reject any extra OR missing asset (the release is immutable, so an
+                  # incomplete/augmented set could never be corrected).
+                  PUBLISHED=$(gh release view "$TAG" --json assets --jq '.assets[].name' | sort)
+                  EXPECTED=$(cat "$RUNNER_TEMP/manifest.txt")
+                  if [ "$PUBLISHED" != "$EXPECTED" ]; then
+                    echo "::error::published release asset set does not match the manifest."
+                    printf 'expected:\n%s\npublished:\n%s\n' "$EXPECTED" "$PUBLISHED"
+                    exit 1
+                  fi
+                  echo "Published asset set matches the manifest."
 
                   # Register each contract hash with stellar.expert. The endpoint queues the
                   # request and returns {ok:1}; the assets are already published so the async
