@@ -85,9 +85,9 @@ so use this recipe (not profile A) to reproduce a release/attestation hash.
 
 ```bash
 # 1. Check out the EXACT revision the release was built from — otherwise you'll
-#    hash whatever you currently have checked out. Both are in the release notes:
-#    the commit SHA, and the tag <package>-<version>.
-git checkout august-vault-v0.1.0        # or: git checkout <commit-from-release-notes>
+#    hash whatever you currently have checked out. The release is published on the
+#    version tag (e.g. v0.1.0); its notes also record the exact commit SHA.
+git checkout v0.1.0                     # or: git checkout <commit-from-release-notes>
 
 # 2. Install the pinned toolchain + target
 rustup toolchain install 1.95.0
