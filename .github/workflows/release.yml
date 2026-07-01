@@ -164,6 +164,9 @@ jobs:
             attestations: write # write the attestation
         env:
             GH_TOKEN: ${{ github.token }}
+            # This job intentionally does NOT check out the repo, so `gh release`
+            # commands can't infer it from a git remote — tell gh explicitly.
+            GH_REPO: ${{ github.repository }}
             REPO: ${{ github.repository }}
             SHA: ${{ github.sha }}
             TAG: ${{ github.ref_name }}
