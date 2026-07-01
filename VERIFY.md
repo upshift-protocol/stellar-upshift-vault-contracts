@@ -13,6 +13,12 @@ use the one that matches what you are verifying:
 Both profiles share the same toolchain: **Rust 1.95.0**, **soroban-sdk 25.1.1**
 (pinned in `Cargo.lock` — do not update it), **Stellar CLI 25.1.0**.
 
+> **Verification is point-in-time.** These vaults are **upgradeable** — the admin
+> upgrade authority can replace the WASM (see the README's Security section). A
+> matching hash therefore proves the deployed code **at the moment you fetch it**,
+> not forever. Re-fetch the live on-chain hash whenever you need fresh assurance;
+> a past match does not guarantee the current bytecode.
+
 ---
 
 ## A — Verify the currently-deployed vaults (legacy build)
@@ -32,15 +38,15 @@ Both live vaults run the **same** `august-vault` bytecode, built for
 Reproduce:
 
 ```bash
-# These vaults are immutable. Build from the repo revision that matches the
-# on-chain metadata (rsver 1.95.0, rssdkver 25.1.1) — the initial published
-# commit reproduces the current deployment. Check out that commit first if the
-# repository has since advanced.
+# Compiler/SDK metadata alone can't identify the source revision, so check out
+# the exact commit the current on-chain bytecode was built from:
+git checkout 33a02f4d17de27d899ca5686e5bb77250222c501
+
 rustup toolchain install 1.95.0
 rustup target add wasm32-unknown-unknown --toolchain 1.95.0
 
-# Build for the legacy target using the committed Cargo.lock, then optimize
-cargo +1.95.0 build -p august-vault --target wasm32-unknown-unknown --release
+# Build for the legacy target, enforcing the committed Cargo.lock, then optimize
+cargo +1.95.0 build -p august-vault --target wasm32-unknown-unknown --release --locked
 stellar contract optimize \
   --wasm target/wasm32-unknown-unknown/release/august_vault.wasm \
   --wasm-out august_vault.optimized.wasm
@@ -78,14 +84,18 @@ so use this recipe (not profile A) to reproduce a release/attestation hash.
 ```bash
 # 1. Check out the EXACT revision the release was built from — otherwise you'll
 #    hash whatever you currently have checked out. Both are in the release notes:
-#    the commit SHA, and the tag <version>-<package>.
-git checkout v0.1.0-august-vault        # or: git checkout <commit-from-release-notes>
+#    the commit SHA, and the tag <package>-<version>.
+git checkout august-vault-v0.1.0        # or: git checkout <commit-from-release-notes>
 
 # 2. Install the pinned toolchain + target
 rustup toolchain install 1.95.0
 rustup target add wasm32v1-none --toolchain 1.95.0
 
-# 3. Run the same command the release workflow runs (source_repo makes the hash
+# 3. Enforce the committed lockfile (fails if Cargo.lock is inconsistent with the
+#    tagged source, so a different dependency graph can't be resolved silently)
+RUSTUP_TOOLCHAIN=1.95.0 cargo metadata --format-version=1 --no-deps --locked >/dev/null
+
+# 4. Run the same command the release workflow runs (source_repo makes the hash
 #    repo-specific, so keep it exactly as below)
 RUSTUP_TOOLCHAIN=1.95.0 stellar contract build --optimize \
   --package august-vault \
