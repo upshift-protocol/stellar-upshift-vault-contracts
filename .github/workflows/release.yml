@@ -1,19 +1,22 @@
 name: Release & Attest
 
 # Push a version tag (e.g. `git tag v0.1.0 && git push origin v0.1.0`) to build,
-# attest, publish, and register each contract with stellar.expert.
+# attest, publish, and register the contracts with stellar.expert.
 #
-# Trust model (see the review that shaped this):
-#   guard   - verifies the tagged commit is on `main` and the ci.yml *push* run passed.
-#   build   - UNPRIVILEGED. Runs cargo, so build scripts / proc-macros execute here;
-#             it therefore has contents:read only, no GH_TOKEN, no OIDC, and no
-#             persisted checkout credentials. It hands the compiled WASM to the
-#             next job as an artifact.
+# Trust model:
+#   guard   - verifies the tagged commit is on `main` and that ci.yml's real
+#             build/test/lint jobs actually succeeded for it (not merely that a
+#             skip-only run reported green).
+#   build   - UNPRIVILEGED. Runs cargo, so build scripts / proc-macros execute
+#             here; it has contents:read only, no GH_TOKEN, no OIDC, and no
+#             persisted checkout credentials. It hands each compiled WASM to the
+#             publish job as an artifact.
 #   publish - PRIVILEGED, gated by the protected `release` environment (independent
-#             reviewer). It does NOT execute repository code — only the downloaded
-#             artifact: attest -> publish -> register. Attest before publish (a
-#             published release is always attested); publish before register (the
-#             asset must exist when stellar.expert's async worker runs).
+#             reviewer, no admin bypass, v*-tags only). It does NOT execute
+#             repository code — only the downloaded artifacts: attest, then publish
+#             ONE immutable release carrying all assets on the workflow's own v*
+#             TRIGGER tag (already protected by the tag ruleset — so there is no
+#             unprotected derived tag to race), then register with stellar.expert.
 #
 # Self-contained (no upstream reusable workflow); every nested action is pinned by
 # SHA. See VERIFY.md to reproduce a hash locally.
@@ -145,19 +148,16 @@ jobs:
                   retention-days: 7
 
     publish:
-        name: Attest, publish & register (privileged) — ${{ matrix.package }}
+        name: Attest, publish & register (privileged)
         needs: build
         runs-on: ubuntu-latest
-        # Independent-reviewer gate for producing official, deployable artifacts.
+        # Independent-reviewer gate (no admin bypass, v*-tags only) for producing
+        # official, deployable artifacts.
         environment: release
         permissions:
             id-token: write # OIDC for the build attestation
             contents: write # create the release
             attestations: write # write the attestation
-        strategy:
-            fail-fast: false
-            matrix:
-                package: [august-vault, xlm-strategy]
         env:
             GH_TOKEN: ${{ github.token }}
             REPO: ${{ github.repository }}
@@ -165,125 +165,98 @@ jobs:
             TAG: ${{ github.ref_name }}
             SERVER_URL: ${{ github.server_url }}
             RUN_ID: ${{ github.run_id }}
-            PACKAGE: ${{ matrix.package }}
         steps:
-            - name: Download the built artifact
+            - name: Download all build artifacts
               uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
               with:
-                  name: wasm-${{ matrix.package }}
+                  pattern: wasm-*
                   path: dist
+                  merge-multiple: true
 
-            - name: Resolve artifact + hash
-              id: art
+            - name: Resolve artifacts
               run: |
                   set -euo pipefail
-                  n=$(find dist -name '*.wasm' | wc -l | tr -d ' ')
-                  [ "$n" -eq 1 ] || { echo "::error::expected exactly one wasm in artifact, found $n"; exit 1; }
-                  WASM=$(find dist -name '*.wasm')
-                  HASH=$(sha256sum "$WASM" | cut -d' ' -f1)
-                  {
-                    echo "path=$WASM"
-                    echo "name=$(basename "$WASM")"
-                    echo "hash=$HASH"
-                  } >> "$GITHUB_OUTPUT"
-                  echo "Artifact $(basename "$WASM") sha256=$HASH"
+                  mapfile -t WASMS < <(find dist -name '*.wasm' | sort)
+                  [ "${#WASMS[@]}" -ge 1 ] || { echo "::error::no wasm artifacts downloaded"; exit 1; }
+                  printf '%s\n' "${WASMS[@]}" > "$RUNNER_TEMP/wasms.txt"
+                  for w in "${WASMS[@]}"; do sha256sum "$w"; done
 
-            - name: Attest build provenance
+            # Attest before publishing, so a published release is always attested.
+            - name: Attest build provenance (all artifacts)
               uses: actions/attest-build-provenance@ef244123eb79f2f7a7e75d99086184180e6d0018 # v1.4.4
               with:
-                  subject-path: ${{ steps.art.outputs.path }}
-                  subject-name: ${{ steps.art.outputs.name }}
+                  subject-path: dist/*.wasm
 
-            - name: Publish release (idempotent, never clobber)
-              env:
-                  WASM_PATH: ${{ steps.art.outputs.path }}
-                  WASM_NAME: ${{ steps.art.outputs.name }}
-                  WASM_HASH: ${{ steps.art.outputs.hash }}
+            - name: Publish one immutable release on the protected tag, then register
               run: |
                   set -euo pipefail
-                  # Package-prefixed (NOT v-prefixed) so this derived tag neither
-                  # matches the protected `v*` ruleset nor re-triggers this workflow.
-                  REL="${PACKAGE}-${TAG}"
-                  NOTES="Reproducible build of ${PACKAGE} at ${SHA} (target wasm32v1-none, Rust 1.95.0, Stellar CLI 25.1.0, --meta source_repo=github:${REPO}). WASM sha256: ${WASM_HASH}. Reproduce: check out ${SHA} and follow section B of VERIFY.md. Vaults are upgradeable — verification is point-in-time; re-fetch the current on-chain hash."
+                  # Publish on the workflow's own v* TRIGGER tag. It is protected by the tag
+                  # ruleset (v* creation/update/deletion is admin-only), so — unlike a new
+                  # <pkg>-v* tag — a write-capable non-admin cannot move/recreate it. That
+                  # removes the TOCTOU: there is no unprotected tag to slip in between the
+                  # check below and `gh release create`. The tag already exists (it triggered
+                  # this run) and points at $SHA; we assert that defensively.
+                  tagsha=$(gh api "repos/$REPO/commits/$TAG" --jq '.sha')
+                  [ "$tagsha" = "$SHA" ] || { echo "::error::trigger tag $TAG points to $tagsha, not $SHA"; exit 1; }
 
-                  # If the derived tag already exists it MUST point at exactly this commit:
-                  # `gh release create` reuses an existing tag and --target does NOT retarget
-                  # it, so a stray tag pointing elsewhere would bind this release/asset to the
-                  # wrong source archive. matching-refs returns 200 + an array (no 404
-                  # ambiguity); peel annotated tags to their commit.
-                  match=$(gh api "repos/$REPO/git/matching-refs/tags/$REL" \
-                    | jq -c --arg r "refs/tags/$REL" 'first(.[] | select(.ref==$r) | .object) // {}')
-                  otype=$(printf '%s' "$match" | jq -r '.type // ""')
-                  osha=$(printf '%s' "$match" | jq -r '.sha // ""')
-                  if [ -n "$osha" ]; then
-                    [ "$otype" != "tag" ] || osha=$(gh api "repos/$REPO/git/tags/$osha" --jq '.object.sha')
-                    [ "$osha" = "$SHA" ] || { echo "::error::tag $REL already exists at $osha, not $SHA — refusing to publish"; exit 1; }
-                  fi
+                  mapfile -t WASMS < "$RUNNER_TEMP/wasms.txt"
 
-                  # Release/asset state. A 404 (no release for this tag) is expected and
-                  # distinct from "release exists, asset absent".
-                  if rel=$(gh api "repos/$REPO/releases/tags/$REL" 2>/dev/null); then
-                    asset=$(printf '%s' "$rel" | jq -r --arg n "$WASM_NAME" 'if any((.assets // [])[]; .name==$n) then "present" else "absent" end')
+                  NOTES=$(printf 'Reproducible builds at commit %s (target wasm32v1-none, Rust 1.95.0, Stellar CLI 25.1.0). Reproduce: check out %s and follow section B of VERIFY.md. Vaults are upgradeable — verification is point-in-time; re-fetch the current on-chain hash.' "$SHA" "$SHA")
+                  for w in "${WASMS[@]}"; do
+                    NOTES=$(printf '%s\n- %s: sha256 %s' "$NOTES" "$(basename "$w")" "$(sha256sum "$w" | cut -d' ' -f1)")
+                  done
+
+                  # One release carrying ALL assets in a single atomic create (immutable
+                  # releases forbid changing assets afterward, so all must be attached at
+                  # once). Rerun-safe: if the immutable release already exists from a prior
+                  # run, skip creation and re-verify + re-register (registration is idempotent).
+                  if gh release view "$TAG" >/dev/null 2>&1; then
+                    echo "Release $TAG already exists — verifying its assets match this build."
                   else
-                    asset="norelease"
+                    gh release create "$TAG" "${WASMS[@]}" \
+                      --target "$SHA" \
+                      --title "$TAG" \
+                      --notes "$NOTES"
                   fi
-                  case "$asset" in
-                    present)
-                      # Never clobber: the published bytes must already equal our hash.
-                      tmp=$(mktemp -d)
-                      gh release download "$REL" --pattern "$WASM_NAME" --dir "$tmp"
-                      pub=$(sha256sum "$tmp/$WASM_NAME" | cut -d' ' -f1)
-                      [ "$pub" = "$WASM_HASH" ] || { echo "::error::published asset $pub != $WASM_HASH; refusing to replace"; exit 1; }
-                      echo "Asset already published with matching hash." ;;
-                    absent)
-                      echo "Release exists (tag verified at $SHA), asset missing — uploading."
-                      gh release upload "$REL" "$WASM_PATH" ;;
-                    *)
-                      # --target creates the tag at this commit (any pre-existing tag was
-                      # already verified == $SHA above).
-                      gh release create "$REL" "$WASM_PATH" \
-                        --target "$SHA" \
-                        --title "${PACKAGE} ${TAG}" \
-                        --notes "$NOTES" ;;
-                  esac
 
-                  # Read back the published asset and confirm it matches the attested hash
-                  # (catches a corrupted/truncated upload that still exited 0).
+                  # Read back every published asset and confirm it matches what we built
+                  # (catches a corrupted upload, or a pre-existing release with wrong bytes).
                   vrf=$(mktemp -d)
-                  gh release download "$REL" --pattern "$WASM_NAME" --dir "$vrf"
-                  got=$(sha256sum "$vrf/$WASM_NAME" | cut -d' ' -f1)
-                  [ "$got" = "$WASM_HASH" ] || { echo "::error::published asset $got != attested $WASM_HASH"; exit 1; }
-                  echo "Verified published asset matches attested hash $WASM_HASH."
+                  for w in "${WASMS[@]}"; do
+                    name=$(basename "$w")
+                    gh release download "$TAG" --pattern "$name" --dir "$vrf" --clobber
+                    got=$(sha256sum "$vrf/$name" | cut -d' ' -f1)
+                    want=$(sha256sum "$w" | cut -d' ' -f1)
+                    [ "$got" = "$want" ] || { echo "::error::published $name ($got) != built ($want)"; exit 1; }
+                    echo "Verified $name matches $want."
+                  done
 
-            - name: Register with stellar.expert (fail loud)
-              env:
-                  WASM_HASH: ${{ steps.art.outputs.hash }}
-              run: |
-                  set -euo pipefail
-                  payload=$(jq -nc \
-                    --arg repository "$SERVER_URL/$REPO" \
-                    --arg commitHash "$SHA" \
-                    --arg jobId "publish" \
-                    --arg runId "$RUN_ID" \
-                    --arg contractHash "$WASM_HASH" \
-                    --arg packageName "$PACKAGE" \
-                    '{repository:$repository, commitHash:$commitHash, jobId:$jobId, runId:$runId, contractHash:$contractHash, packageName:$packageName}')
-                  echo "Enqueuing stellar.expert validation: $payload"
-                  # Registration is asynchronous — the endpoint queues the request and
-                  # returns {ok:1}; the asset is already published above so the worker can
-                  # find it. We assert BOTH the HTTP status (via --fail-with-body) AND the
-                  # application-level {ok:1}, so a 200 carrying {ok:0}/an error body fails
-                  # loudly instead of passing green. Final validation is confirmed on
-                  # stellar.expert once the async worker runs.
-                  set +e
-                  resp=$(curl --fail-with-body -sS -X POST \
-                    "https://api.stellar.expert/explorer/public/contract-validation/match" \
-                    -H "Content-Type: application/json" \
-                    -d "$payload" \
-                    --max-time 30)
-                  rc=$?
-                  set -e
-                  echo "HTTP rc=$rc response: $resp"
-                  [ "$rc" -eq 0 ] || { echo "::error::stellar.expert POST failed (curl rc=$rc): $resp"; exit 1; }
-                  ok=$(printf '%s' "$resp" | jq -r '.ok // empty')
-                  [ "$ok" = "1" ] || { echo "::error::stellar.expert did not accept the registration (ok=${ok:-none}): $resp"; exit 1; }
+                  # Register each contract hash with stellar.expert. The endpoint queues the
+                  # request and returns {ok:1}; the assets are already published so the async
+                  # worker can find them. Assert BOTH the HTTP status and {ok:1} so a 200
+                  # carrying {ok:0}/an error body fails loudly. Final validation is confirmed
+                  # on stellar.expert once the worker runs.
+                  for w in "${WASMS[@]}"; do
+                    name=$(basename "$w")
+                    pkg="${name%_v*}"
+                    hash=$(sha256sum "$w" | cut -d' ' -f1)
+                    payload=$(jq -nc \
+                      --arg repository "$SERVER_URL/$REPO" \
+                      --arg commitHash "$SHA" \
+                      --arg jobId "publish" \
+                      --arg runId "$RUN_ID" \
+                      --arg contractHash "$hash" \
+                      --arg packageName "$pkg" \
+                      '{repository:$repository, commitHash:$commitHash, jobId:$jobId, runId:$runId, contractHash:$contractHash, packageName:$packageName}')
+                    echo "Enqueuing stellar.expert validation for $pkg: $payload"
+                    set +e
+                    resp=$(curl --fail-with-body -sS -X POST \
+                      "https://api.stellar.expert/explorer/public/contract-validation/match" \
+                      -H "Content-Type: application/json" -d "$payload" --max-time 30)
+                    rc=$?
+                    set -e
+                    echo "HTTP rc=$rc response: $resp"
+                    [ "$rc" -eq 0 ] || { echo "::error::stellar.expert POST failed for $pkg (rc=$rc): $resp"; exit 1; }
+                    ok=$(printf '%s' "$resp" | jq -r '.ok // empty')
+                    [ "$ok" = "1" ] || { echo "::error::stellar.expert did not accept $pkg (ok=${ok:-none}): $resp"; exit 1; }
+                  done
