@@ -195,7 +195,7 @@ This code is provided as-is. Review the source and your own deployment parameter
 
 ## Reproducible Builds & Verification
 
-The bytecode deployed on Stellar Mainnet is reproducible from this source: building with the pinned toolchain yields a WASM whose hash is byte-for-byte identical to what runs on-chain. See **[VERIFY.md](VERIFY.md)** for the exact toolchain, build steps, the expected hash, and how to verify the live contracts yourself.
+The bytecode deployed on Stellar Mainnet is reproducible from this source: building with the pinned toolchain yields a WASM whose hash matches the on-chain bytecode. Because the vault is **upgradeable** (see [Security](#security)), this verification is **point-in-time** — a match proves the deployed code at the moment you fetch its hash, so always re-fetch the current on-chain hash before relying on it. See **[VERIFY.md](VERIFY.md)** for the exact toolchain, build steps, expected hashes, and how to verify (and re-verify) the live contracts yourself.
 
 ## Project Structure
 
