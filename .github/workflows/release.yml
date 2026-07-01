@@ -86,11 +86,16 @@ jobs:
                   rustup target add wasm32v1-none --toolchain 1.95.0
                   rustc +1.95.0 --version
 
-            - name: Install Stellar CLI 25.1.0 (pinned .deb)
+            - name: Install Stellar CLI 25.1.0 (pinned .deb, checksum-verified)
+              env:
+                  STELLAR_CLI_DEB_SHA256: "0260de467b29883c7cc227a3d8df7b7d8723805ffa54dcfe8171af1255de33c8"
               run: |
                   set -euo pipefail
                   curl -fsSL -o /tmp/stellar-cli.deb \
                     https://github.com/stellar/stellar-cli/releases/download/v25.1.0/stellar-cli_25.1.0_amd64.deb
+                  # Finding #3: the GitHub release asset is mutable, so verify its published
+                  # SHA-256 before installing it with sudo in this privileged job.
+                  echo "${STELLAR_CLI_DEB_SHA256}  /tmp/stellar-cli.deb" | sha256sum -c -
                   sudo dpkg -i /tmp/stellar-cli.deb
                   rm /tmp/stellar-cli.deb
                   stellar --version
@@ -119,19 +124,29 @@ jobs:
                     echo "wasm_hash=$HASH"
                   } >> "$GITHUB_OUTPUT"
 
-            - name: Create release at the tagged commit
+            - name: Publish release at the tagged commit (idempotent)
               env:
                   WASM_PATH: ${{ steps.build.outputs.wasm_path }}
                   WASM_HASH: ${{ steps.build.outputs.wasm_hash }}
               run: |
                   set -euo pipefail
-                  # Finding #2: --target pins the created tag (and its source archive)
-                  # to the exact commit that produced the attested WASM.
-                  gh release create "${TAG}-${PACKAGE}" "$WASM_PATH" \
-                    --target "$SHA" \
-                    --title "${PACKAGE} ${TAG}" \
-                    --notes "Reproducible build of \`${PACKAGE}\` at commit \`${SHA}\`.
-                  WASM sha256: \`${WASM_HASH}\`. See VERIFY.md to reproduce."
+                  REL="${TAG}-${PACKAGE}"
+                  # Finding #1: point to the attested-release recipe (wasm32v1-none + source_repo
+                  # meta) — NOT the legacy recipe — so following the note reproduces THIS hash.
+                  NOTES="Reproducible build of ${PACKAGE} at ${SHA} (target wasm32v1-none, Rust 1.95.0, Stellar CLI 25.1.0, --meta source_repo=github:${REPO}). WASM sha256: ${WASM_HASH}. Reproduce: see section B ('Verify an attested release build') in VERIFY.md."
+                  # Finding #2: retry-safe. If a later step (attest/register) fails and the job
+                  # is rerun, don't fail here just because the release already exists.
+                  if gh release view "$REL" >/dev/null 2>&1; then
+                    echo "Release $REL already exists — re-uploading asset."
+                    gh release upload "$REL" "$WASM_PATH" --clobber
+                  else
+                    # --target pins the created tag (and its source archive) to the exact
+                    # commit that produced the attested WASM.
+                    gh release create "$REL" "$WASM_PATH" \
+                      --target "$SHA" \
+                      --title "${PACKAGE} ${TAG}" \
+                      --notes "$NOTES"
+                  fi
 
             - name: Attest build provenance
               uses: actions/attest-build-provenance@ef244123eb79f2f7a7e75d99086184180e6d0018 # v1.4.4
