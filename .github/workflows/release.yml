@@ -152,7 +152,14 @@ jobs:
                   retention-days: 7
 
     publish:
-        name: Attest, publish & register (privileged)
+        # Deliberately NO `name:`. The stellar.expert registration below posts
+        # this job's identifier, and their validator can only resolve that string
+        # against the jobs API — which exposes `name` and a numeric id, never the
+        # YAML key. A descriptive `name:` makes key and name diverge, so the
+        # posted identifier matches no job in the run and validation fails
+        # silently: {ok:1}, then nothing, forever. Their reference workflow gets
+        # away with `${{ github.job }}` only because its key and name coincide.
+        # The trust boundary this job sits on is documented in the header.
         needs: build
         runs-on: ubuntu-latest
         # Independent-reviewer gate (no admin bypass, v*-tags only) for producing
@@ -172,7 +179,27 @@ jobs:
             TAG: ${{ github.ref_name }}
             SERVER_URL: ${{ github.server_url }}
             RUN_ID: ${{ github.run_id }}
+            JOB_ID: ${{ github.job }}
         steps:
+            # Runs before the release is published, because the release is
+            # IMMUTABLE: publishing one we already know cannot be registered
+            # would strand it permanently. stellar.expert's validator receives
+            # this job's identifier as a string and can only resolve it against
+            # the jobs API, which exposes `name` and a numeric id — never the
+            # YAML key. If the two diverge, the POST still returns {ok:1} and
+            # validation then never completes, with silence as the only signal.
+            # v0.1.0 was lost to exactly that for 34 days.
+            - name: Verify this job is resolvable by stellar.expert
+              run: |
+                  set -euo pipefail
+                  names=$(gh api "repos/$REPO/actions/runs/$RUN_ID/jobs" --paginate --jq '.jobs[].name')
+                  if ! printf '%s\n' "$names" | grep -qxF "$JOB_ID"; then
+                    echo "::error::job identifier '$JOB_ID' matches no job name in run $RUN_ID — registration would be accepted and then never complete."
+                    printf '%s\n' "$names" | sed 's/^/  available job name: /'
+                    exit 1
+                  fi
+                  echo "Job identifier '$JOB_ID' resolves in run $RUN_ID."
+
             - name: Download all build artifacts
               uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
               with:
@@ -272,7 +299,7 @@ jobs:
                     payload=$(jq -nc \
                       --arg repository "$SERVER_URL/$REPO" \
                       --arg commitHash "$SHA" \
-                      --arg jobId "publish" \
+                      --arg jobId "$JOB_ID" \
                       --arg runId "$RUN_ID" \
                       --arg contractHash "$hash" \
                       --arg packageName "$pkg" \
