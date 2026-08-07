@@ -1,6 +1,6 @@
 [package]
 name = "august-vault"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 description = "Share-based vault contract for Stellar Soroban"
 license = "MIT"

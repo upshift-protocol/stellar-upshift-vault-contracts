@@ -169,7 +169,7 @@ dependencies = [
 
 [[package]]
 name = "august-vault"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "proptest",
  "soroban-sdk",
@@ -2209,7 +2209,7 @@ dependencies = [
 
 [[package]]
 name = "xlm-strategy"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "soroban-sdk",
  "stellar-contract-utils",
