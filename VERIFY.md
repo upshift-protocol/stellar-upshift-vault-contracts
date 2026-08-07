@@ -128,13 +128,13 @@ and equally legitimate — hash. Use the row matching the release you are checki
 | Release | Stellar CLI | `august-vault` | `xlm-strategy` |
 | --- | --- | --- | --- |
 | v0.1.0 | 25.1.0 (deb sha256 `0260de46…`) | `3bd05dfa…d12` | `e3443e37…da4` |
-| v0.1.1 and later | 27.0.0 (deb sha256 `4b3755e1…`) | `5f676c87…8be` | `f105a1f1…1f3` |
+| v0.1.1 | 27.0.0 (deb sha256 `4b3755e1…`) | `c88ee1b8…e25` | `db117a8b…d2c` |
 
 Full hashes for the current release:
 
 ```
-august-vault:  5f676c87963056db473a3b3533169a55c5fa78a6cda542863422f1b89205b8be   (92,025 bytes)
-xlm-strategy:  f105a1f1928d56bef77997e891761a459588da332af1c549e456d578bca2d1f3
+august-vault:  c88ee1b8a60a7f9581969e6c098610d2a43a569df076e26fda43809daa16fe25   (92,025 bytes)
+xlm-strategy:  db117a8bacfa237dbce24c54d4579ce805921512f56d2a96b82ac57b21eb9d2c
 ```
 
 To reproduce **v0.1.0** instead, substitute CLI `25.1.0` and its checksum
