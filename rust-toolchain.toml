@@ -1,3 +1,14 @@
+# Pinned, not rolling. `Cargo.lock` is fixed so the attested build is
+# reproducible (VERIFY.md), which means the compiler is a build input too:
+# a newer rustc against a frozen lockfile is an untested combination, and the
+# lockfile cannot be bumped to accommodate it without changing the WASM hash.
+#
+# 1.95.0 is the version the attested release is built with. Rust 1.97.1 does
+# not compile this lockfile at all — `ethnum` 1.5.2 transmutes into
+# `TryFromIntError`, whose layout changed, so it fails with E0512.
+#
+# Both targets: wasm32-unknown-unknown for the legacy profile still live on
+# chain, wasm32v1-none for the attested one.
 [toolchain]
-channel = "stable"
-targets = ["wasm32-unknown-unknown"]
+channel = "1.95.0"
+targets = ["wasm32-unknown-unknown", "wasm32v1-none"]
