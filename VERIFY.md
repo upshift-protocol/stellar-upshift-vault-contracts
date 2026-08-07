@@ -10,8 +10,14 @@ use the one that matches what you are verifying:
 | **A — Legacy** | `wasm32-unknown-unknown` | none | the currently-deployed Gami vaults |
 | **B — Attested release** | `wasm32v1-none` | `source_repo` embedded | the `Release & Attest` workflow (new vaults) |
 
-Both profiles share the same toolchain: **Rust 1.95.0**, **soroban-sdk 25.1.1**
-(pinned in `Cargo.lock` — do not update it), **Stellar CLI 25.1.0**.
+Both profiles share **Rust 1.95.0** and **soroban-sdk 25.1.1** (pinned in
+`Cargo.lock` — do not update it). They differ in the CLI: profile **A** was
+built with **Stellar CLI 25.1.0**, profile **B** uses **27.0.0**.
+
+The CLI version is not incidental — `stellar contract build` embeds it in the
+contract metadata as `cliver`, so it is part of what the hash commits to. B
+tracks the version stellar.expert's own build workflow pins, because their
+source-validation service reproduces the build to match it.
 
 > **Verification is point-in-time.** These vaults are **upgradeable** — the admin
 > upgrade authority can replace the WASM (see the README's Security section). A
@@ -99,8 +105,8 @@ docker run --rm --platform linux/amd64 -v "$PWD:/src:ro" \
     apt-get update -qq && apt-get install -y -qq curl ca-certificates git >/dev/null
     rustup target add wasm32v1-none
     curl -fsSL -o /tmp/s.deb \
-      https://github.com/stellar/stellar-cli/releases/download/v25.1.0/stellar-cli_25.1.0_amd64.deb
-    echo "0260de467b29883c7cc227a3d8df7b7d8723805ffa54dcfe8171af1255de33c8  /tmp/s.deb" | sha256sum -c -
+      https://github.com/stellar/stellar-cli/releases/download/v27.0.0/stellar-cli_27.0.0_amd64.deb
+    echo "4b3755e13ba7514a108e422b02c75233face37c3e2cde131f55e6c7ce6eea44e  /tmp/s.deb" | sha256sum -c -
     dpkg -i /tmp/s.deb 2>/dev/null || apt-get install -y -f -qq
     git config --global --add safe.directory /src
     mkdir /build && git -C /src archive HEAD | tar -x -C /build && cd /build
@@ -112,17 +118,40 @@ docker run --rm --platform linux/amd64 -v "$PWD:/src:ro" \
   '
 ```
 
-For **v0.1.0** this reproduces the attested hashes exactly:
+### Which CLI version for which release
+
+The CLI version above is not a detail you may vary: `stellar contract build`
+embeds it in the contract metadata as `cliver`, so it is part of what the hash
+commits to. Building a given commit with a different CLI yields a different —
+and equally legitimate — hash. Use the row matching the release you are checking.
+
+| Release | Stellar CLI | `august-vault` | `xlm-strategy` |
+| --- | --- | --- | --- |
+| v0.1.0 | 25.1.0 (deb sha256 `0260de46…`) | `3bd05dfa…d12` | `e3443e37…da4` |
+| v0.1.1 and later | 27.0.0 (deb sha256 `4b3755e1…`) | `5f676c87…8be` | `f105a1f1…1f3` |
+
+Full hashes for the current release:
 
 ```
-august-vault:  3bd05dfa2bf65299d359e86a4672a45900e8c5768d9f056ad8da5ccd779bcd12   (92,025 bytes)
-xlm-strategy:  e3443e37b6da76ef061051f5e170537ef6e596711869c09a1ec9cd9e55345da4
+august-vault:  5f676c87963056db473a3b3533169a55c5fa78a6cda542863422f1b89205b8be   (92,025 bytes)
+xlm-strategy:  f105a1f1928d56bef77997e891761a459588da332af1c549e456d578bca2d1f3
 ```
 
-These match the release assets, the GitHub build attestation
+To reproduce **v0.1.0** instead, substitute CLI `25.1.0` and its checksum
+`0260de467b29883c7cc227a3d8df7b7d8723805ffa54dcfe8171af1255de33c8` in the
+command above. That build is still live on chain, so its recipe is kept here
+rather than retired with the release.
+
+These match the release assets and the GitHub build attestation
 (`https://github.com/upshift-protocol/stellar-upshift-vault-contracts/attestations`),
-and the WASM hash of any vault deployed against them — which then shows as verified
-on stellar.expert.
+and the WASM hash of any vault deployed against them.
+
+> **On the stellar.expert badge.** A matching hash is the verification; the
+> explorer's badge is one renderer of it. As of 2026-08-07 contracts running our
+> attested builds still display as unverified there despite carrying `source_repo`
+> on chain and a valid public attestation — a limitation in that pipeline, not in
+> the build. Reproduce with the recipe above and you have checked the bytecode
+> yourself, independently of any explorer.
 
 > **Filename note:** compare by **hash**, not filename — the published release asset
 > is `<package>_v<version>.wasm` (e.g. `august-vault_v0.1.0.wasm`).

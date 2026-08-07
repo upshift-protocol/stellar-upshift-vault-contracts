@@ -320,7 +320,7 @@ jobs:
     # Reproducible Build (enforce the attested hashes)
     #
     # Rebuilds each contract with the pinned RELEASE toolchain (Rust 1.95.0,
-    # Stellar CLI 25.1.0, wasm32v1-none, --meta source_repo) — the same build the
+    # Stellar CLI 27.0.0, wasm32v1-none, --meta source_repo) — the same build the
     # release workflow attests — and asserts the sha256 matches reproducible-hashes.txt.
     # CI runners are linux/amd64, so no container is needed here (that's only for
     # reproducing on other hosts; see VERIFY.md § B). A bytecode change must update
@@ -343,13 +343,13 @@ jobs:
                   rustup toolchain install 1.95.0 --profile minimal
                   rustup target add wasm32v1-none --toolchain 1.95.0
 
-            - name: Install Stellar CLI 25.1.0 (pinned .deb, checksum-verified)
+            - name: Install Stellar CLI 27.0.0 (pinned .deb, checksum-verified)
               env:
-                  STELLAR_CLI_DEB_SHA256: "0260de467b29883c7cc227a3d8df7b7d8723805ffa54dcfe8171af1255de33c8"
+                  STELLAR_CLI_DEB_SHA256: "4b3755e13ba7514a108e422b02c75233face37c3e2cde131f55e6c7ce6eea44e"
               run: |
                   set -euo pipefail
                   curl -fsSL -o /tmp/stellar-cli.deb \
-                    https://github.com/stellar/stellar-cli/releases/download/v25.1.0/stellar-cli_25.1.0_amd64.deb
+                    https://github.com/stellar/stellar-cli/releases/download/v27.0.0/stellar-cli_27.0.0_amd64.deb
                   echo "${STELLAR_CLI_DEB_SHA256}  /tmp/stellar-cli.deb" | sha256sum -c -
                   sudo dpkg -i /tmp/stellar-cli.deb
                   stellar --version

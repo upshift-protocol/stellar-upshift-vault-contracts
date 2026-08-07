@@ -103,13 +103,13 @@ jobs:
                   rustup target add wasm32v1-none --toolchain 1.95.0
                   rustc +1.95.0 --version
 
-            - name: Install Stellar CLI 25.1.0 (pinned .deb, checksum-verified)
+            - name: Install Stellar CLI 27.0.0 (pinned .deb, checksum-verified)
               env:
-                  STELLAR_CLI_DEB_SHA256: "0260de467b29883c7cc227a3d8df7b7d8723805ffa54dcfe8171af1255de33c8"
+                  STELLAR_CLI_DEB_SHA256: "4b3755e13ba7514a108e422b02c75233face37c3e2cde131f55e6c7ce6eea44e"
               run: |
                   set -euo pipefail
                   curl -fsSL -o /tmp/stellar-cli.deb \
-                    https://github.com/stellar/stellar-cli/releases/download/v25.1.0/stellar-cli_25.1.0_amd64.deb
+                    https://github.com/stellar/stellar-cli/releases/download/v27.0.0/stellar-cli_27.0.0_amd64.deb
                   echo "${STELLAR_CLI_DEB_SHA256}  /tmp/stellar-cli.deb" | sha256sum -c -
                   sudo dpkg -i /tmp/stellar-cli.deb
                   rm /tmp/stellar-cli.deb
@@ -218,7 +218,7 @@ jobs:
 
                   mapfile -t WASMS < "$RUNNER_TEMP/wasms.txt"
 
-                  NOTES=$(printf 'Reproducible builds at commit %s (target wasm32v1-none, Rust 1.95.0, Stellar CLI 25.1.0). Reproduce: check out %s and follow section B of VERIFY.md. Vaults are upgradeable — verification is point-in-time; re-fetch the current on-chain hash.' "$SHA" "$SHA")
+                  NOTES=$(printf 'Reproducible builds at commit %s (target wasm32v1-none, Rust 1.95.0, Stellar CLI 27.0.0). Reproduce: check out %s and follow section B of VERIFY.md. Vaults are upgradeable — verification is point-in-time; re-fetch the current on-chain hash.' "$SHA" "$SHA")
                   for w in "${WASMS[@]}"; do
                     NOTES=$(printf '%s\n- %s: sha256 %s' "$NOTES" "$(basename "$w")" "$(sha256sum "$w" | cut -d' ' -f1)")
                   done
