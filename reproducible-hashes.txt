@@ -1,5 +1,5 @@
 # Expected SHA-256 of each contract's attested, reproducible release WASM
-# (target wasm32v1-none, Rust 1.95.0, Stellar CLI 25.1.0, --meta source_repo).
+# (target wasm32v1-none, Rust 1.95.0, Stellar CLI 27.0.0, --meta source_repo).
 #
 # The `reproducible-build` CI job rebuilds each contract with that pinned
 # toolchain and asserts the hash below. When a contract's bytecode changes
@@ -10,5 +10,5 @@
 # Reproduce locally: see VERIFY.md § B.
 #
 # package       sha256
-august-vault    3bd05dfa2bf65299d359e86a4672a45900e8c5768d9f056ad8da5ccd779bcd12
-xlm-strategy    e3443e37b6da76ef061051f5e170537ef6e596711869c09a1ec9cd9e55345da4
+august-vault    5f676c87963056db473a3b3533169a55c5fa78a6cda542863422f1b89205b8be
+xlm-strategy    f105a1f1928d56bef77997e891761a459588da332af1c549e456d578bca2d1f3
