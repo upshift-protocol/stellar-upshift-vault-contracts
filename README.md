@@ -190,6 +190,7 @@ Deploy script parameters:
 - **Inflation-attack protection**: A configurable virtual `decimals_offset` defends against the classic first-depositor share-inflation attack.
 - **Upgrade authority**: The contract is upgradeable via WASM replacement; the upgrade authority should be transferred to an admin multisig after production deployment.
 - **Instance TTL**: State entries extend their TTL on every state-changing call; `extend_ttl()` is a permissionless fallback to keep the instance alive during quiet periods.
+- **Audit**: The contracts were assessed by Halborn in March–April 2026. [docs/AUDIT.md](docs/AUDIT.md) records the exact source revision reviewed, how it maps to this repository and to the deployed bytecode, and which post-audit additions fall outside the audit's scope.
 
 This code is provided as-is. Review the source and your own deployment parameters before using it with real funds. To report a security issue, please contact the maintainers rather than opening a public issue.
 
@@ -233,6 +234,8 @@ stellar-upshift-vault-contracts/
 ├── Cargo.toml                      # Workspace configuration
 ├── Cargo.lock                      # Pinned dependency versions
 ├── Makefile                        # Common commands
+├── docs/
+│   └── AUDIT.md                    # Security audit coverage (Halborn, 2026)
 ├── deny.toml                       # cargo-deny config (advisories, licenses, bans)
 ├── rust-toolchain.toml             # Rust toolchain configuration
 ├── VERIFY.md                       # Reproducible build & on-chain verification
