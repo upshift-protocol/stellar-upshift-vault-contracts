@@ -15,7 +15,11 @@ on:
             tag:
                 description: "Released tag to re-register (e.g. v0.1.1)"
                 required: true
-                default: "v0.1.1"
+
+# One re-registration per tag at a time.
+concurrency:
+    group: reregister-${{ inputs.tag }}
+    cancel-in-progress: false
 
 jobs:
     reregister:
@@ -24,6 +28,7 @@ jobs:
         permissions:
             contents: read
             actions: read
+            attestations: read
         env:
             GH_TOKEN: ${{ github.token }}
             GH_REPO: ${{ github.repository }}
@@ -34,7 +39,7 @@ jobs:
             - name: Resolve original release run, commit, and asset hashes
               run: |
                   set -euo pipefail
-                  [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::tag must look like vX.Y.Z (got $TAG)"; exit 1; }
+                  [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]] || { echo "::error::tag must look like vX.Y.Z[-suffix] (got $TAG)"; exit 1; }
 
                   # The successful release.yml run for this tag — the run whose publish job
                   # attested and released these exact bytes.
@@ -43,11 +48,32 @@ jobs:
                   [ -n "$run" ] && [ "$run" != "null null" ] || { echo "::error::no successful release.yml run for $TAG"; exit 1; }
                   read -r RUN_ID SHA <<< "$run"
                   echo "release run: $RUN_ID  commit: $SHA"
+                  # The run must have built the commit the tag points at now (guards a
+                  # re-pushed tag pairing a stale run with different release bytes).
+                  tag_sha=$(gh api "repos/$REPO/commits/$TAG" --jq '.sha')
+                  [ "$tag_sha" = "$SHA" ] || { echo "::error::release run commit $SHA != current $TAG commit $tag_sha"; exit 1; }
                   echo "RUN_ID=$RUN_ID" >> "$GITHUB_ENV"
                   echo "SHA=$SHA" >> "$GITHUB_ENV"
 
                   mkdir -p dist
                   gh release download "$TAG" --pattern '*.wasm' --dir dist
+
+                  # Same exact-manifest rule as release.yml: no missing, extra or
+                  # wrong-version assets. Keep in sync with release.yml's PACKAGES.
+                  PACKAGES=(august-vault xlm-strategy)
+                  EXPECTED=$(for p in "${PACKAGES[@]}"; do echo "${p}_${TAG}.wasm"; done | sort)
+                  GOT=$(find dist -name '*.wasm' -printf '%f\n' | sort)
+                  if [ "$GOT" != "$EXPECTED" ]; then
+                    echo "::error::release assets do not match the required manifest."
+                    printf 'expected:\n%s\ngot:\n%s\n' "$EXPECTED" "$GOT"
+                    exit 1
+                  fi
+
+                  # Only register bytes that release.yml itself attested.
+                  for w in dist/*.wasm; do
+                    gh attestation verify "$w" --repo "$REPO" \
+                      --signer-workflow "$REPO/.github/workflows/release.yml"
+                  done
                   sha256sum dist/*.wasm
 
             - name: Re-send stellar.expert validation requests
