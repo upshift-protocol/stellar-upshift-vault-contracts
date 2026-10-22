@@ -27,7 +27,6 @@ jobs:
         runs-on: ubuntu-latest
         permissions:
             contents: read
-            actions: read
             attestations: read
         env:
             GH_TOKEN: ${{ github.token }}
@@ -36,26 +35,10 @@ jobs:
             SERVER_URL: ${{ github.server_url }}
             TAG: ${{ inputs.tag }}
         steps:
-            - name: Resolve original release run, commit, and asset hashes
+            - name: Resolve attested assets, release run, and commit
               run: |
                   set -euo pipefail
                   [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]] || { echo "::error::tag must look like vX.Y.Z[-suffix] (got $TAG)"; exit 1; }
-
-                  # The successful release.yml run for this tag — the run whose publish job
-                  # attested and released these exact bytes.
-                  # -f URL-encodes the query, so a "+build" tag isn't decoded as a space.
-                  run=$(gh api --method GET "repos/$REPO/actions/workflows/release.yml/runs" \
-                    -f branch="$TAG" -f event=push -f status=success -F per_page=1 \
-                    --jq '.workflow_runs[0] | "\(.id) \(.head_sha)"')
-                  [ -n "$run" ] && [ "$run" != "null null" ] || { echo "::error::no successful release.yml run for $TAG"; exit 1; }
-                  read -r RUN_ID SHA <<< "$run"
-                  echo "release run: $RUN_ID  commit: $SHA"
-                  # The run must have built the commit the tag points at now (guards a
-                  # re-pushed tag pairing a stale run with different release bytes).
-                  tag_sha=$(gh api "repos/$REPO/commits/$TAG" --jq '.sha')
-                  [ "$tag_sha" = "$SHA" ] || { echo "::error::release run commit $SHA != current $TAG commit $tag_sha"; exit 1; }
-                  echo "RUN_ID=$RUN_ID" >> "$GITHUB_ENV"
-                  echo "SHA=$SHA" >> "$GITHUB_ENV"
 
                   mkdir -p dist
                   gh release download "$TAG" --pattern '*.wasm' --dir dist
@@ -71,11 +54,28 @@ jobs:
                     exit 1
                   fi
 
-                  # Only register bytes that release.yml itself attested.
-                  for w in dist/*.wasm; do
+                  # Only register bytes that release.yml itself attested for this tag, and
+                  # take the run + commit from that provenance rather than from the run's
+                  # conclusion: a release whose original POST failed has a failed run but
+                  # valid, attested assets, and that is exactly the case this exists for.
+                  prov=$(for w in dist/*.wasm; do
                     gh attestation verify "$w" --repo "$REPO" \
-                      --signer-workflow "$REPO/.github/workflows/release.yml"
-                  done
+                      --signer-workflow "$REPO/.github/workflows/release.yml" \
+                      --source-ref "refs/tags/$TAG" --format json \
+                      | jq -r '.[].verificationResult.signature.certificate
+                               | "\(.runInvocationURI | capture("/actions/runs/(?<id>[0-9]+)/").id) \(.sourceRepositoryDigest)"' \
+                      || exit 1 # every asset must verify, not just the last one in the loop
+                  done | sort -u)
+                  [ -n "$prov" ] && [ "$(printf '%s\n' "$prov" | wc -l)" -eq 1 ] || { echo "::error::assets not attested by exactly one run/commit:"; echo "$prov"; exit 1; }
+                  read -r RUN_ID SHA <<< "$prov"
+                  echo "attesting run: $RUN_ID  commit: $SHA"
+
+                  # The attested commit must be the one the tag points at now (guards a
+                  # re-pushed tag pairing old provenance with a different commit).
+                  tag_sha=$(gh api "repos/$REPO/commits/$TAG" --jq '.sha')
+                  [ "$tag_sha" = "$SHA" ] || { echo "::error::attested commit $SHA != current $TAG commit $tag_sha"; exit 1; }
+                  echo "RUN_ID=$RUN_ID" >> "$GITHUB_ENV"
+                  echo "SHA=$SHA" >> "$GITHUB_ENV"
                   sha256sum dist/*.wasm
 
             - name: Re-send stellar.expert validation requests
