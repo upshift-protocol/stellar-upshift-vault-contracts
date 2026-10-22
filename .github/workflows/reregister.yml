@@ -8,6 +8,11 @@ name: Re-register with stellar.expert
 #
 # Read-only: builds nothing, publishes nothing, and changes no release or
 # attestation. Hashes come from the published (immutable) release assets.
+#
+# TEMPORARY experiment (AUGUST-7177). stellar.expert says it discards requests
+# that weren't built by its own soroban-build-workflow, so this may be ignored
+# even when it returns {ok:1}. Delete this file once that is settled either way.
+# The registration loop and PACKAGES are copied from release.yml's publish job.
 
 on:
     workflow_dispatch:
@@ -76,7 +81,6 @@ jobs:
                   [ "$tag_sha" = "$SHA" ] || { echo "::error::attested commit $SHA != current $TAG commit $tag_sha"; exit 1; }
                   echo "RUN_ID=$RUN_ID" >> "$GITHUB_ENV"
                   echo "SHA=$SHA" >> "$GITHUB_ENV"
-                  sha256sum dist/*.wasm
 
             - name: Re-send stellar.expert validation requests
               run: |
