@@ -1,0 +1,80 @@
+name: Re-register with stellar.expert
+
+# Manually re-send an existing release's stellar.expert validation request.
+#
+# stellar.expert now only accepts validation requests from GitHub Actions runners
+# (direct POSTs get 403), and the original release run is too old to re-run. This
+# re-sends the exact payload release.yml sent, pointing at that original run.
+#
+# Read-only: builds nothing, publishes nothing, and changes no release or
+# attestation. Hashes come from the published (immutable) release assets.
+
+on:
+    workflow_dispatch:
+        inputs:
+            tag:
+                description: "Released tag to re-register (e.g. v0.1.1)"
+                required: true
+                default: "v0.1.1"
+
+jobs:
+    reregister:
+        name: Re-register ${{ inputs.tag }}
+        runs-on: ubuntu-latest
+        permissions:
+            contents: read
+            actions: read
+        env:
+            GH_TOKEN: ${{ github.token }}
+            GH_REPO: ${{ github.repository }}
+            REPO: ${{ github.repository }}
+            SERVER_URL: ${{ github.server_url }}
+            TAG: ${{ inputs.tag }}
+        steps:
+            - name: Resolve original release run, commit, and asset hashes
+              run: |
+                  set -euo pipefail
+                  [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::tag must look like vX.Y.Z (got $TAG)"; exit 1; }
+
+                  # The successful release.yml run for this tag — the run whose publish job
+                  # attested and released these exact bytes.
+                  run=$(gh api "repos/$REPO/actions/workflows/release.yml/runs?branch=$TAG&event=push&status=success&per_page=1" \
+                    --jq '.workflow_runs[0] | "\(.id) \(.head_sha)"')
+                  [ -n "$run" ] && [ "$run" != "null null" ] || { echo "::error::no successful release.yml run for $TAG"; exit 1; }
+                  read -r RUN_ID SHA <<< "$run"
+                  echo "release run: $RUN_ID  commit: $SHA"
+                  echo "RUN_ID=$RUN_ID" >> "$GITHUB_ENV"
+                  echo "SHA=$SHA" >> "$GITHUB_ENV"
+
+                  mkdir -p dist
+                  gh release download "$TAG" --pattern '*.wasm' --dir dist
+                  sha256sum dist/*.wasm
+
+            - name: Re-send stellar.expert validation requests
+              run: |
+                  set -euo pipefail
+                  # Same payload shape and assertions as release.yml's publish job.
+                  for w in dist/*.wasm; do
+                    name=$(basename "$w")
+                    pkg="${name%_v*}"
+                    hash=$(sha256sum "$w" | cut -d' ' -f1)
+                    payload=$(jq -nc \
+                      --arg repository "$SERVER_URL/$REPO" \
+                      --arg commitHash "$SHA" \
+                      --arg jobId "publish" \
+                      --arg runId "$RUN_ID" \
+                      --arg contractHash "$hash" \
+                      --arg packageName "$pkg" \
+                      '{repository:$repository, commitHash:$commitHash, jobId:$jobId, runId:$runId, contractHash:$contractHash, packageName:$packageName}')
+                    echo "Enqueuing stellar.expert validation for $pkg: $payload"
+                    set +e
+                    resp=$(curl --fail-with-body -sS -X POST \
+                      "https://api.stellar.expert/explorer/public/contract-validation/match" \
+                      -H "Content-Type: application/json" -d "$payload" --max-time 30)
+                    rc=$?
+                    set -e
+                    echo "HTTP rc=$rc response: $resp"
+                    [ "$rc" -eq 0 ] || { echo "::error::stellar.expert POST failed for $pkg (rc=$rc): $resp"; exit 1; }
+                    ok=$(printf '%s' "$resp" | jq -r '.ok // empty')
+                    [ "$ok" = "1" ] || { echo "::error::stellar.expert did not accept $pkg (ok=${ok:-none}): $resp"; exit 1; }
+                  done
