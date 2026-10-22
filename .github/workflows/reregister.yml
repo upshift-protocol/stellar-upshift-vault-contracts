@@ -20,15 +20,19 @@ on:
             tag:
                 description: "Released tag to re-register (e.g. v0.1.1)"
                 required: true
+    # TEMP (revert before merge): run once from the PR branch without merging.
+    push:
+        branches: [ci/stellar-expert-reregister]
+        paths: [.github/workflows/reregister.yml]
 
 # One re-registration per tag at a time.
 concurrency:
-    group: reregister-${{ inputs.tag }}
+    group: reregister-${{ inputs.tag || 'v0.1.1' }}
     cancel-in-progress: false
 
 jobs:
     reregister:
-        name: Re-register ${{ inputs.tag }}
+        name: Re-register ${{ inputs.tag || 'v0.1.1' }}
         runs-on: ubuntu-latest
         permissions:
             contents: read
@@ -38,7 +42,7 @@ jobs:
             GH_REPO: ${{ github.repository }}
             REPO: ${{ github.repository }}
             SERVER_URL: ${{ github.server_url }}
-            TAG: ${{ inputs.tag }}
+            TAG: ${{ inputs.tag || 'v0.1.1' }}
         steps:
             - name: Resolve attested assets, release run, and commit
               run: |
