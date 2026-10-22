@@ -43,7 +43,9 @@ jobs:
 
                   # The successful release.yml run for this tag — the run whose publish job
                   # attested and released these exact bytes.
-                  run=$(gh api "repos/$REPO/actions/workflows/release.yml/runs?branch=$TAG&event=push&status=success&per_page=1" \
+                  # -f URL-encodes the query, so a "+build" tag isn't decoded as a space.
+                  run=$(gh api --method GET "repos/$REPO/actions/workflows/release.yml/runs" \
+                    -f branch="$TAG" -f event=push -f status=success -F per_page=1 \
                     --jq '.workflow_runs[0] | "\(.id) \(.head_sha)"')
                   [ -n "$run" ] && [ "$run" != "null null" ] || { echo "::error::no successful release.yml run for $TAG"; exit 1; }
                   read -r RUN_ID SHA <<< "$run"
