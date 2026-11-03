@@ -1,10 +1,38 @@
 # Code owners for stellar-upshift-vault-contracts
 #
-# These owners are automatically requested for review on any pull request,
-# and branch protection on `main` requires at least one approving review
-# from a code owner before a PR can be merged.
+# Owners are requested for review on every PR. Branch protection on `main`
+# requires an approving review from a code owner, enforced for admins too,
+# and the most recent push must be approved by someone other than its pusher.
 #
-# Two owners are listed so review is not bottlenecked on one person — a PR's
-# author cannot approve their own PR, so either owner can approve the other's.
+# Ownership is held by a team (@upshift-protocol/stellar-contracts-owners:
+# gr-august, ae2212, cjeva10), so on/offboarding is a team membership change,
+# not a commit here. The team needs Write access for this file to be valid.
+#
+# Rules: the LAST matching pattern wins, so `*` stays first. Any one owner
+# listed on a line can approve; CODEOWNERS cannot require two approvals.
+#
+# The sections below are the paths that decide what runs on chain or how it
+# is released. They all map to the same team today; they are listed
+# explicitly so a dedicated reviewer (e.g. a security team or auditor
+# contact) can be added to exactly those lines later.
 
-* @gr-august @ae2212
+*                                   @upshift-protocol/stellar-contracts-owners
+
+# --- Bytecode-determining: a change here alters the deployed WASM / its hash ---
+/contracts/*/src/                   @upshift-protocol/stellar-contracts-owners
+/contracts/*/Cargo.toml             @upshift-protocol/stellar-contracts-owners
+/Cargo.toml                         @upshift-protocol/stellar-contracts-owners
+/Cargo.lock                         @upshift-protocol/stellar-contracts-owners
+/rust-toolchain.toml                @upshift-protocol/stellar-contracts-owners
+
+# --- Approved artifacts: what CI and the mainnet monitor treat as trusted ---
+/reproducible-hashes.txt            @upshift-protocol/stellar-contracts-owners
+/interfaces/                        @upshift-protocol/stellar-contracts-owners
+/deployments/                       @upshift-protocol/stellar-contracts-owners
+
+# --- Release, CI and deploy path ---
+/.github/                           @upshift-protocol/stellar-contracts-owners
+/deny.toml                          @upshift-protocol/stellar-contracts-owners
+/scripts/deploy*.sh                 @upshift-protocol/stellar-contracts-owners
+/scripts/upgrade.sh                 @upshift-protocol/stellar-contracts-owners
+/VERIFY.md                          @upshift-protocol/stellar-contracts-owners
