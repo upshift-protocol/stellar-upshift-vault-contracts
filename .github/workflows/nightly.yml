@@ -67,7 +67,7 @@ jobs:
                   set -euo pipefail
                   label="nightly-failure"
                   gh label create "$label" --color D93F0B --description "Nightly workflow failed" 2>/dev/null || true
-                  existing=$(gh issue list --label "$label" --state open --json number --jq '.[0].number // empty')
+                  existing=$(gh issue list --label "$label" --state open --author "app/github-actions" --json number --jq '.[0].number // empty')
                   if [ -n "$existing" ]; then
                     gh issue comment "$existing" --body "Failed again: $RUN_URL"
                   else

@@ -170,7 +170,11 @@ jobs:
                     "Run: $RUN_URL" \
                     "If this was an approved upgrade, update \`deployments/mainnet.txt\` in a PR and close this issue. If not, treat it as an incident." \
                     "$marker")
-                  existing=$(gh issue list --label "$label" --state open --json number --jq '.[0].number // empty')
+                  # Only trust issues opened by this workflow's bot: anyone can
+                  # comment on a public repo, so markers are read from bot-authored
+                  # text only, or an attacker could pre-post one to mute an alert.
+                  existing=$(gh issue list --label "$label" --state open --author "app/github-actions" \
+                    --json number --jq '.[0].number // empty')
                   if [ -z "$existing" ]; then
                     url=$(gh issue create --title "🚨 Mainnet WASM hash drift detected" --label "$label" \
                       --assignee "$ALERT_ASSIGNEES" --body "$body")
@@ -180,8 +184,8 @@ jobs:
                   fi
                   url=$(gh issue view "$existing" --json url --jq .url)
                   echo "url=$url" >> "$GITHUB_OUTPUT"
-                  seen=$(gh issue view "$existing" --json body,comments \
-                    --jq "[.body, .comments[].body] | map(select(contains(\"$marker\"))) | length")
+                  seen=$(gh issue view "$existing" --json body,comments --jq \
+                    "[.body, (.comments[] | select(.author.login == \"github-actions\") | .body)] | map(select(contains(\"$marker\"))) | length")
                   if [ "$seen" -eq 0 ]; then
                     # A drift we have not alerted on yet: full report + re-notify.
                     gh issue comment "$existing" --body "$body"
@@ -225,7 +229,7 @@ jobs:
                   label="mainnet-monitor-degraded"
                   gh label create "$label" --color FBCA04 \
                     --description "Mainnet monitor could not verify live WASM" 2>/dev/null || true
-                  existing=$(gh issue list --label "$label" --state open --json number --jq '.[0].number // empty')
+                  existing=$(gh issue list --label "$label" --state open --author "app/github-actions" --json number --jq '.[0].number // empty')
                   if [ -n "$existing" ]; then
                     echo "Already tracked in #$existing"
                   else
