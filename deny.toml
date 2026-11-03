@@ -1,5 +1,14 @@
 [advisories]
 unmaintained = "workspace"
+ignore = [
+    # crypto-bigint 0.5.5 timing side channels. Reached only through
+    # soroban-env-host 25 (k256/p256), which runs in native tests and tooling;
+    # it is not compiled into the wasm32v1-none contracts. The fix needs
+    # crypto-bigint >= 0.7.6, which elliptic-curve 0.13 cannot use, and
+    # Cargo.lock is frozen for reproducible builds (VERIFY.md). Remove this
+    # when moving to soroban-sdk 30.
+    { id = "RUSTSEC-2026-0387", reason = "host-side only via soroban-env-host 25; not in deployed WASM; fix needs semver-incompatible crypto-bigint 0.7" },
+]
 
 [licenses]
 allow = ["Apache-2.0", "Apache-2.0 WITH LLVM-exception", "MIT", "BSD-2-Clause", "BSD-3-Clause", "Unicode-3.0", "Zlib"]
