@@ -455,47 +455,70 @@ jobs:
     # Scout (Soroban-specific static analysis, advisory)
     #
     # CoinFabrik Scout detects Soroban footguns clippy can't see (unchecked
-    # auth, unsafe unwrap/expect, unbounded storage, integer issues). Advisory
-    # for now: findings are published to the job summary + artifact and do not
-    # gate merges. Once the baseline is triaged, set fail_on_error: true and
-    # add this job to CI Pass.
+    # auth, unsafe unwrap/expect, unbounded storage, integer issues). Findings
+    # go to the job summary + artifact and do not gate merges (not in CI Pass).
+    # The job fails only if Scout itself breaks (no report produced).
+    #
+    # Runs the coinfabrik/scout image directly (pinned by digest) rather than
+    # through scout-actions, because it needs one workaround: Scout's dylint
+    # clones rust-lang/rust-clippy and checks out `master`, but clippy renamed
+    # its default branch to `main` (dylint fixed this in 6.3.0; Scout still
+    # pins 4.1.2). A git post-checkout hook creates `master` -> `main` in fresh
+    # clones. Drop the hook once Scout ships with dylint >= 6.3.0.
     # ============================================
     scout:
         name: Scout (advisory)
         runs-on: ubuntu-latest
         needs: changes
         if: needs.changes.outputs.code == 'true'
-        # Advisory, and its toolchain is upstream-owned: as of 2026-11 the
-        # action's image fails building dylint_driver (git ref 'master' not
-        # found). Don't let a broken tool paint PRs red.
-        continue-on-error: true
+        env:
+            SCOUT_IMAGE: coinfabrik/scout@sha256:7dcdbcd438e7615d1c2eeef8aabfa5ff7bcc3e6657c49933c47c042f585bac46
         steps:
             - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
               with:
                   persist-credentials: false
 
-            # Each run writes report.md at the repo root; move it aside per package.
-            - name: Scout august-vault
-              uses: CoinFabrik/scout-actions@6f5e53f890c1fe20c9b08369aec4f183a5b710b2 # v3.2
-              with:
-                  working_directory: contracts/august-vault
-                  fail_on_error: false
-            - run: if [ -f report.md ]; then mkdir -p scout; mv report.md scout/august-vault.md; fi
-
-            - name: Scout xlm-strategy
-              uses: CoinFabrik/scout-actions@6f5e53f890c1fe20c9b08369aec4f183a5b710b2 # v3.2
-              with:
-                  working_directory: contracts/xlm-strategy
-                  fail_on_error: false
-            - run: if [ -f report.md ]; then mkdir -p scout; mv report.md scout/xlm-strategy.md; fi
-
-            - name: Publish reports to job summary
-              if: always()
+            - name: Git hook for the clippy master -> main rename
               run: |
-                  shopt -s nullglob
-                  reports=(scout/*.md)
-                  if [ ${#reports[@]} -eq 0 ]; then echo "No Scout report produced." >> "$GITHUB_STEP_SUMMARY"; fi
-                  for f in "${reports[@]}"; do cat "$f" >> "$GITHUB_STEP_SUMMARY"; done
+                  set -euo pipefail
+                  mkdir -p "$RUNNER_TEMP/scout-hooks"
+                  cat > "$RUNNER_TEMP/scout-hooks/post-checkout" <<'HOOK'
+                  #!/bin/sh
+                  git show-ref -q --verify refs/heads/master && exit 0
+                  git show-ref -q --verify refs/heads/main && git branch master main
+                  exit 0
+                  HOOK
+                  chmod +x "$RUNNER_TEMP/scout-hooks/post-checkout"
+
+            - name: Run Scout
+              run: |
+                  set -uo pipefail
+                  docker pull -q "$SCOUT_IMAGE"
+                  broken=0
+                  for pkg in august-vault xlm-strategy; do
+                    out="$RUNNER_TEMP/scout-out/$pkg"
+                    mkdir -p "$out"
+                    docker run --rm \
+                      -v "$GITHUB_WORKSPACE:/scoutme" -w /scoutme \
+                      -v "$out:/output" \
+                      -v "$RUNNER_TEMP/scout-hooks:/scout-hooks:ro" \
+                      -e GIT_CONFIG_COUNT=1 \
+                      -e GIT_CONFIG_KEY_0=core.hooksPath \
+                      -e GIT_CONFIG_VALUE_0=/scout-hooks \
+                      -e INPUT_TARGET="contracts/$pkg" \
+                      -e INPUT_SCOUT_ARGS="--output-format md-gh --output-path /output/report.md --cicd /output" \
+                      "$SCOUT_IMAGE"
+                    mkdir -p scout
+                    if [ -f "$out/report.md" ]; then
+                      cp "$out/report.md" "scout/$pkg.md"
+                      echo "## Scout: $pkg" >> "$GITHUB_STEP_SUMMARY"
+                      cat "$out/report.md" >> "$GITHUB_STEP_SUMMARY"
+                    else
+                      echo "::error::Scout produced no report for $pkg (tool failure, see log above)"
+                      broken=1
+                    fi
+                  done
+                  exit "$broken"
 
             - name: Upload Scout reports
               if: always()
