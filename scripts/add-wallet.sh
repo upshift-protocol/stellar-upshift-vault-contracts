@@ -214,5 +214,6 @@ echo "      -- deposit_to_subaccount --operator <OPERATOR_ADDR> --subaccount $WA
 echo ""
 echo "  To withdraw, the wallet owner must first approve the vault as spender:"
 echo "    stellar contract invoke --id <TOKEN_ID> --network $NETWORK --source-account <wallet-owner> \\"
-echo "      -- approve --from $WALLET_ADDR --spender $VAULT_ID --amount <AMOUNT> --expiration_ledger <LEDGER>"
+echo "      -- approve --from $WALLET_ADDR --spender $VAULT_ID --amount <AMOUNT> --live_until_ledger <LEDGER>"
+echo "    (Stellar CLI < 30 names this argument --expiration_ledger.)"
 echo ""

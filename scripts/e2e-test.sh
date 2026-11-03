@@ -317,7 +317,7 @@ cleanup() {
     # Clean up test identities (ignore errors — best-effort cleanup)
     for id in "$ADMIN_IDENTITY" "$OPERATOR_IDENTITY" "$USER_IDENTITY" \
               "$PROFIT_IDENTITY" "$CONTROLLER_IDENTITY" "$PROTOCOL_IDENTITY" "e2e-new-admin"; do
-        stellar keys rm "$id" 2>/dev/null || true
+        stellar keys rm --force "$id" 2>/dev/null || true
     done
 }
 
@@ -398,13 +398,12 @@ else
     docker stop "$CONTAINER_NAME" 2>/dev/null || true
     docker rm "$CONTAINER_NAME" 2>/dev/null || true
 
-    # Pinned to an immutable quickstart build (protocol 25, core v26.1.0)
-    # instead of the rolling :testing tag. :testing now ships a pre-release
-    # Soroban host (protocol 27) that no released stellar-cli is compatible
-    # with, so `stellar contract asset deploy` fails at simulation with
-    # HostError: Error(Context, InternalError). Keep this in lockstep with the
-    # stellar-cli version (v25.1.0): both must speak the same protocol.
-    QUICKSTART_IMAGE="stellar/quickstart:v638-b1076.1-testing"
+    # Pinned to an immutable quickstart build (protocol 30, core and RPC
+    # v30.0.0) instead of the rolling :testing tag, which can jump to a
+    # pre-release host that no released stellar-cli supports. Keep this in
+    # lockstep with the stellar-cli version (v30.0.1) and the image in
+    # .github/workflows/ci.yml: both must speak the same protocol.
+    QUICKSTART_IMAGE="stellar/quickstart:v690-b1601.1-testing"
     log "Starting $QUICKSTART_IMAGE in standalone mode..."
     docker run -d \
         --name "$CONTAINER_NAME" \
@@ -483,7 +482,7 @@ phase 3 "Create test identities and fund accounts"
 for identity in "$ADMIN_IDENTITY" "$OPERATOR_IDENTITY" "$USER_IDENTITY" \
                 "$PROFIT_IDENTITY" "$CONTROLLER_IDENTITY" "$PROTOCOL_IDENTITY"; do
     # Remove if exists from a previous run
-    stellar keys rm "$identity" 2>/dev/null || true
+    stellar keys rm --force "$identity" 2>/dev/null || true
     if ! stellar keys generate "$identity"; then
         fail "Could not generate key for $identity"
         exit 1
@@ -1441,7 +1440,7 @@ log "9.5a: Two-step admin transfer"
 
 # Create a new identity for the new admin
 NEW_ADMIN_IDENTITY="e2e-new-admin"
-stellar keys rm "$NEW_ADMIN_IDENTITY" 2>/dev/null || true
+stellar keys rm --force "$NEW_ADMIN_IDENTITY" 2>/dev/null || true
 stellar keys generate "$NEW_ADMIN_IDENTITY" || { fail "Could not generate $NEW_ADMIN_IDENTITY key"; exit 1; }
 NEW_ADMIN_ADDRESS=$(get_address "$NEW_ADMIN_IDENTITY")
 fund_account "$NEW_ADMIN_IDENTITY" "$NEW_ADMIN_ADDRESS"
@@ -1655,7 +1654,7 @@ echo ""
 log "9.6a: Register a Wallet subaccount"
 
 WALLET_IDENTITY="e2e-wallet"
-stellar keys rm "$WALLET_IDENTITY" 2>/dev/null || true
+stellar keys rm --force "$WALLET_IDENTITY" 2>/dev/null || true
 stellar keys generate "$WALLET_IDENTITY" || { fail "Could not generate $WALLET_IDENTITY key"; exit 1; }
 WALLET_ADDRESS=$(get_address "$WALLET_IDENTITY")
 fund_account "$WALLET_IDENTITY" "$WALLET_ADDRESS"
@@ -1735,7 +1734,7 @@ invoke_mut_as "$WALLET_IDENTITY" "$TOKEN_ID" approve \
     --from "$WALLET_ADDRESS" \
     --spender "$VAULT_ID" \
     --amount "$WALLET_PARTIAL_PULL" \
-    --expiration_ledger "$APPROVE_EXPIRATION_LEDGER"
+    --live_until_ledger "$APPROVE_EXPIRATION_LEDGER"
 
 invoke_mut_as "$OPERATOR_IDENTITY" "$VAULT_ID" withdraw_from_subaccount \
     --operator "$OPERATOR_ADDRESS" \
@@ -1948,10 +1947,10 @@ SUBACCOUNTS_FINAL=$(invoke_read "$VAULT_ID" get_subaccounts)
 assert_not_contains "Wallet removed at end of phase 9.6" \
     "$SUBACCOUNTS_FINAL" "$WALLET_ADDRESS"
 
-stellar keys rm "$WALLET_IDENTITY" 2>/dev/null || true
+stellar keys rm --force "$WALLET_IDENTITY" 2>/dev/null || true
 
 # Clean up new admin identity
-stellar keys rm "$NEW_ADMIN_IDENTITY" 2>/dev/null || true
+stellar keys rm --force "$NEW_ADMIN_IDENTITY" 2>/dev/null || true
 
 # ---------------------------------------------------------------------------
 # Phase 10: Summary

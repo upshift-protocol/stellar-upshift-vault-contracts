@@ -184,9 +184,14 @@ jobs:
                     fi
                   fi
 
-            - name: Install stellar CLI
+            - name: Install Stellar CLI 30.0.1 (pinned .deb, checksum-verified)
+              env:
+                  STELLAR_CLI_DEB_SHA256: "3f3a42f3e645f44edc38393e28550fee971a4045bbf5b42b650fe76f02a391e9"
               run: |
-                  curl -fsSL -o /tmp/stellar-cli.deb https://github.com/stellar/stellar-cli/releases/download/v25.1.0/stellar-cli_25.1.0_amd64.deb
+                  set -euo pipefail
+                  curl -fsSL -o /tmp/stellar-cli.deb \
+                    https://github.com/stellar/stellar-cli/releases/download/v30.0.1/stellar-cli_30.0.1_amd64.deb
+                  echo "${STELLAR_CLI_DEB_SHA256}  /tmp/stellar-cli.deb" | sha256sum -c -
                   sudo dpkg -i /tmp/stellar-cli.deb
                   rm /tmp/stellar-cli.deb
                   echo "stellar CLI: $(stellar --version)"
@@ -221,15 +226,16 @@ jobs:
 
         services:
             stellar:
-                # Pinned to an immutable quickstart build (protocol 25, core
-                # v26.1.0) instead of the rolling :testing tag. :testing now
-                # ships a pre-release Soroban host (protocol 27) that no
-                # released stellar-cli is compatible with, so `stellar contract
-                # asset deploy` fails at simulation with
-                # HostError: Error(Context, InternalError). Keep this in lockstep
-                # with the stellar-cli version installed below (v25.1.0): both
-                # must speak the same protocol.
-                image: stellar/quickstart:v638-b1076.1-testing
+                # Pinned to an immutable quickstart build (protocol 30, core
+                # and RPC v30.0.0) instead of the rolling :testing tag, which
+                # can jump to a pre-release host that no released stellar-cli
+                # supports. Protocol 30 (Bell) is what testnet and mainnet run
+                # after the Nov 2026 votes; the contracts are still built with
+                # soroban-sdk 25, so this run also checks that the deployed
+                # WASM behaves the same on a P30 host. Keep this in lockstep
+                # with the stellar-cli installed below (v30.0.1) and the image
+                # in scripts/e2e-test.sh.
+                image: stellar/quickstart:v690-b1601.1-testing
                 ports:
                     - 8000:8000
                 options: >-
@@ -262,13 +268,16 @@ jobs:
                   restore-keys: |
                       ${{ runner.os }}-cargo-e2e-
 
-            - name: Install stellar CLI
+            - name: Install Stellar CLI 30.0.1 (pinned .deb, checksum-verified)
+              env:
+                  STELLAR_CLI_DEB_SHA256: "3f3a42f3e645f44edc38393e28550fee971a4045bbf5b42b650fe76f02a391e9"
               run: |
-                  if ! command -v stellar &>/dev/null; then
-                    curl -fsSL -o /tmp/stellar-cli.deb https://github.com/stellar/stellar-cli/releases/download/v25.1.0/stellar-cli_25.1.0_amd64.deb
-                    sudo dpkg -i /tmp/stellar-cli.deb
-                    rm /tmp/stellar-cli.deb
-                  fi
+                  set -euo pipefail
+                  curl -fsSL -o /tmp/stellar-cli.deb \
+                    https://github.com/stellar/stellar-cli/releases/download/v30.0.1/stellar-cli_30.0.1_amd64.deb
+                  echo "${STELLAR_CLI_DEB_SHA256}  /tmp/stellar-cli.deb" | sha256sum -c -
+                  sudo dpkg -i /tmp/stellar-cli.deb
+                  rm /tmp/stellar-cli.deb
                   echo "stellar CLI: $(stellar --version)"
 
             - name: Run E2E tests
