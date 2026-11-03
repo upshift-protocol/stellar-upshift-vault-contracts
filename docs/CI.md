@@ -50,7 +50,7 @@ them is how an intended change gets approved:
 
 - `reproducible-hashes.txt`: expected release WASM hashes.
 - `interfaces/<pkg>.rs`: expected public contract interface (see `interfaces/README.md`).
-- `.github/scout-baseline.json`: Scout findings reviewed as false positives, each with its reason. Matched on detector + file + code fragment, so a new finding is never hidden by an old entry.
+- `.github/scout-baseline.json`: Scout findings reviewed as false positives, each with its reason. Matched on detector + file + flagged text + source line (no line numbers), so a new finding is never hidden by an old entry.
 - `deployments/mainnet.txt`: expected live mainnet WASM. **Update it in a PR after an approved upgrade**, or the monitor keeps alerting.
 
 ## Repository settings (not in git)

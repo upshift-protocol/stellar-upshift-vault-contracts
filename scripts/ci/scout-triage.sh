@@ -2,6 +2,12 @@
 # Split a Scout JSON report into NEW findings and ones already reviewed in
 # .github/scout-baseline.json, and print a Markdown summary.
 #
+# A baseline entry covers a finding when the detector matches, the file path
+# ends with `file`, the flagged span text contains `match`, and the source
+# line at the span (read from the checkout) contains `line`. Line numbers are
+# never stored, so entries survive unrelated edits.
+# Run from the repository root (Scout's file_path is repo-relative).
+#
 # Usage: scout-triage.sh REPORT_JSON BASELINE_JSON PACKAGE SUMMARY_MD
 # Appends the Markdown summary to SUMMARY_MD and prints a ::warning
 # annotation (stdout) per NEW critical finding. Never fails on
@@ -10,17 +16,22 @@ set -euo pipefail
 
 report=$1 baseline=$2 pkg=$3 summary=$4
 
-# One object per finding: severity, detector, file, span, message, snippet,
-# and whether a baseline entry covers it (detector + file suffix + fragment).
-triaged=$(jq -c --slurpfile b "$baseline" '
+# Source line at each finding's span start, in finding order.
+lines=$(jq -r '.findings[] | "\(.file_path)\t\(.span | capture(":(?<l>[0-9]+):").l)"' "$report" |
+  while IFS=$'\t' read -r file line; do
+    if [ -f "$file" ]; then sed -n "${line}p" "$file"; else echo; fi
+  done | jq -R . | jq -sc .)
+
+triaged=$(jq -c --slurpfile b "$baseline" --argjson src "$lines" '
   def norm: gsub("\\s+"; " ");
   ([.categories[].vulnerabilities[] | {(.id): .severity}] | add // {}) as $sev
   | ($b[0].reviewed) as $rev
-  | .findings[]
-  | . as $f
+  | .findings | to_entries[]
+  | .value as $f | ($src[.key] // "" | norm) as $line
   | ($rev | map(. as $r | select($r.detector == $f.vulnerability_id
                        and ($f.file_path | endswith($r.file))
-                       and (($f.code_snippet | norm) | contains($r.match | norm))))
+                       and (($f.code_snippet | norm) | contains($r.match | norm))
+                       and ($line | contains($r.line | norm))))
           | first) as $hit
   | {severity: ($sev[$f.vulnerability_id] // "unknown" | ascii_downcase),
      detector: $f.vulnerability_id, file: $f.file_path, span: $f.span,
