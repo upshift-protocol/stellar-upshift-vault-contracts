@@ -1,0 +1,13 @@
+# Approved on-chain WASM for every live mainnet contract.
+#
+# The `Mainnet Monitor` workflow fetches each contract's live WASM hourly from
+# two independent RPC providers and alerts (GitHub issue + Slack) if the
+# sha256 differs from the value below. These contracts are upgradeable, so this
+# is how an unexpected upgrade gets caught.
+#
+# After an APPROVED upgrade, update the hash here in a PR. The PR is the record
+# that the change was intended; until it merges the monitor keeps alerting.
+#
+# name            contract_id                                               sha256
+gami-earn-usdc    CCL3WITWFFXIHV2I52ECV5DPIEOFSTU3PBPR53ILPLF2IP5KHECXRUTY  4b3d9f6b09f7127b0ce81b0ce9d8428f3f960e4e3ce13c11c1cbb446cccc9e73
+gami-earn-xlm     CC6TRAPQD3NK7THUKWPV5SL2JHKQGNXZVB6S6MVYFSLRWAKEFUWZKZ7J  4b3d9f6b09f7127b0ce81b0ce9d8428f3f960e4e3ce13c11c1cbb446cccc9e73

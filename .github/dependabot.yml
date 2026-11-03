@@ -1,0 +1,19 @@
+# Dependabot version updates for GitHub Actions only.
+#
+# Cargo is deliberately NOT listed: Cargo.lock is frozen because it is an input
+# to the attested, reproducible WASM (see VERIFY.md / reproducible-hashes.txt),
+# so routine version-bump PRs would only churn the hashes. Vulnerable crates
+# still raise Dependabot ALERTS (and security-update PRs, which the
+# Reproducible Build job will flag as bytecode changes for review), and the
+# nightly strict cargo-deny run catches new RUSTSEC advisories.
+version: 2
+updates:
+    - package-ecosystem: github-actions
+      directory: /
+      schedule:
+          interval: weekly
+      groups:
+          actions:
+              patterns: ["*"]
+      commit-message:
+          prefix: "ci"

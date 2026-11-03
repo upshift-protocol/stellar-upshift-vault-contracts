@@ -1,0 +1,76 @@
+name: Nightly
+
+# Checks that are too slow for every PR, or that can start failing without any
+# change to this repo:
+#
+#   advisories  - cargo-deny advisories, STRICT. On PRs this check is
+#                 continue-on-error (Cargo.lock is frozen for reproducible
+#                 builds, so a new advisory can't always be fixed in the PR
+#                 that hits it). Here it fails loudly so a new RUSTSEC
+#                 advisory against the frozen lockfile is seen within a day.
+#   deep-tests  - the proptest suites at 20x the PR case count.
+#
+# Any failure opens (or comments on) a `nightly-failure` issue.
+
+on:
+    schedule:
+        - cron: "23 3 * * *"
+    workflow_dispatch:
+
+permissions:
+    contents: read
+
+jobs:
+    advisories:
+        name: Cargo Deny advisories (strict)
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+              with:
+                  persist-credentials: false
+            - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+              with:
+                  command: check advisories
+
+    deep-tests:
+        name: Deep property tests
+        runs-on: ubuntu-latest
+        timeout-minutes: 240
+        env:
+            # PR runs use 1024 (preview math) / 256 (executed round trip).
+            PROPTEST_CASES: "20000"
+        steps:
+            - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+              with:
+                  persist-credentials: false
+
+            - name: Setup Rust
+              uses: dtolnay/rust-toolchain@035fceb3c12fb0c6a9461b52775e16473133e591 # 1.95.0
+
+            - name: Run proptest suites
+              run: cargo test -p august-vault proptest_
+
+    report:
+        name: Report failure
+        needs: [advisories, deep-tests]
+        if: failure()
+        runs-on: ubuntu-latest
+        permissions:
+            issues: write
+        env:
+            GH_TOKEN: ${{ github.token }}
+            GH_REPO: ${{ github.repository }}
+            RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        steps:
+            - name: Open or update issue
+              run: |
+                  set -euo pipefail
+                  label="nightly-failure"
+                  gh label create "$label" --color D93F0B --description "Nightly workflow failed" 2>/dev/null || true
+                  existing=$(gh issue list --label "$label" --state open --json number --jq '.[0].number // empty')
+                  if [ -n "$existing" ]; then
+                    gh issue comment "$existing" --body "Failed again: $RUN_URL"
+                  else
+                    gh issue create --title "Nightly checks failing" --label "$label" \
+                      --body "@upshift-protocol/stellar-contracts-owners the nightly run (strict advisories / deep property tests) failed: $RUN_URL"
+                  fi
