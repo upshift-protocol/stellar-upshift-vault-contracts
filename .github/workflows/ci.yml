@@ -476,14 +476,14 @@ jobs:
               with:
                   working_directory: contracts/august-vault
                   fail_on_error: false
-            - run: mkdir -p scout && mv report.md scout/august-vault.md 2>/dev/null || true
+            - run: if [ -f report.md ]; then mkdir -p scout; mv report.md scout/august-vault.md; fi
 
             - name: Scout xlm-strategy
               uses: CoinFabrik/scout-actions@6f5e53f890c1fe20c9b08369aec4f183a5b710b2 # v3.2
               with:
                   working_directory: contracts/xlm-strategy
                   fail_on_error: false
-            - run: mkdir -p scout && mv report.md scout/xlm-strategy.md 2>/dev/null || true
+            - run: if [ -f report.md ]; then mkdir -p scout; mv report.md scout/xlm-strategy.md; fi
 
             - name: Publish reports to job summary
               if: always()
