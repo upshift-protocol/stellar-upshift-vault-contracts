@@ -7696,7 +7696,7 @@ proptest! {
 //      holder's shares are worth (`preview_redeem` of their balance).
 //
 // Case count defaults to 256 per property and is raised by the nightly
-// `deep-tests` workflow via `PROPTEST_CASES` (see .github/workflows/scheduled.yml).
+// `deep-tests` job via `PROPTEST_CASES` (see .github/workflows/nightly.yml).
 
 fn proptest_cases(default: u32) -> u32 {
     std::env::var("PROPTEST_CASES")

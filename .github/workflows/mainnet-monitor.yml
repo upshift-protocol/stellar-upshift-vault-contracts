@@ -4,12 +4,21 @@ name: Mainnet Monitor
 #
 # The vaults are upgradeable: the admin can replace the bytecode at any time.
 # This workflow fetches each contract's live WASM from TWO independent RPC
-# providers, hashes it, and compares it to deployments/mainnet.txt. On a
-# mismatch it fails, opens (or updates) a GitHub issue that pings the code
-# owners, and posts to Slack if SLACK_WEBHOOK_URL is configured.
+# providers, hashes it, and compares it to deployments/mainnet.txt.
 #
-# RPC errors are reported as a failed run but do NOT open an incident issue:
-# only a hash we actually fetched and that disagrees is treated as drift.
+#   drift     -> `mainnet-wasm-drift` issue, assigned to ALERT_ASSIGNEES, plus a
+#                Slack post. Every DISTINCT drift (a new contract/hash pair) is
+#                alerted, even while an older drift issue is still open.
+#   RPC error -> `mainnet-monitor-degraded` issue (assigned, no Slack), so a
+#                dead provider can't silently turn the monitor off.
+#   keepalive -> GitHub disables schedules in public repos after 60 days with
+#                no repository activity; each run re-enables this workflow via
+#                the API to reset that timer.
+#
+# Repo configuration:
+#   secrets.SLACK_WEBHOOK_URL   Slack incoming webhook (strongly recommended)
+#   vars.ALERT_ASSIGNEES        comma-separated logins (default below)
+#   vars.MAINNET_RPC_PRIMARY / vars.MAINNET_RPC_SECONDARY  RPC overrides
 
 on:
     schedule:
@@ -23,6 +32,9 @@ concurrency:
     group: mainnet-monitor
     cancel-in-progress: false
 
+env:
+    ALERT_ASSIGNEES: ${{ vars.ALERT_ASSIGNEES || 'gr-august,ae2212,cjeva10' }}
+
 jobs:
     check:
         name: Live WASM hash check
@@ -30,9 +42,10 @@ jobs:
         timeout-minutes: 15
         outputs:
             drift: ${{ steps.check.outputs.drift }}
+            rpc_err: ${{ steps.check.outputs.rpc_err }}
+            fingerprint: ${{ steps.check.outputs.fingerprint }}
         env:
             NETWORK_PASSPHRASE: "Public Global Stellar Network ; September 2015"
-            # Override with repo variables if a provider degrades.
             RPC_PRIMARY: ${{ vars.MAINNET_RPC_PRIMARY || 'https://mainnet.sorobanrpc.com' }}
             RPC_SECONDARY: ${{ vars.MAINNET_RPC_SECONDARY || 'https://soroban-rpc.mainnet.stellar.gateway.fm' }}
         steps:
@@ -56,6 +69,8 @@ jobs:
                   set -uo pipefail
                   drift=0; rpc_err=0
                   report=/tmp/report.md
+                  drifted=/tmp/drifted.txt
+                  : > "$drifted"
                   {
                     echo "| Contract | ID | Approved | Live (${RPC_PRIMARY}) | Live (${RPC_SECONDARY}) |"
                     echo "| --- | --- | --- | --- | --- |"
@@ -77,20 +92,33 @@ jobs:
                     case "$name" in ''|\#*) continue ;; esac
                     a=$(fetch "$RPC_PRIMARY" "$id")
                     b=$(fetch "$RPC_SECONDARY" "$id")
-                    status="✅"
+                    this_drift=0; this_err=0
                     for h in "$a" "$b"; do
                       if [ "$h" = ERROR ]; then
-                        rpc_err=1; status="⚠️ RPC error"
+                        this_err=1
                       elif [ "$h" != "$expected" ]; then
-                        drift=1; status="🚨 DRIFT"
+                        this_drift=1
+                        echo "$id $h" >> "$drifted"
                       fi
                     done
+                    # Drift outranks an RPC error in the status label.
+                    if [ "$this_drift" -eq 1 ]; then status="🚨 DRIFT"; drift=1
+                    elif [ "$this_err" -eq 1 ]; then status="⚠️ RPC error"; rpc_err=1
+                    else status="✅"; fi
                     echo "$status $name $id expected=$expected primary=$a secondary=$b"
                     echo "| $status $name | \`$id\` | \`${expected:0:12}…\` | \`${a:0:12}…\` | \`${b:0:12}…\` |" >> "$report"
                   done < deployments/mainnet.txt
 
+                  # Identifies WHICH contract moved to WHICH hash, so a new drift
+                  # is alerted even if an older drift issue is still open.
+                  fingerprint=$(sort -u "$drifted" | sha256sum | cut -c1-16)
+
                   cat "$report" >> "$GITHUB_STEP_SUMMARY"
-                  echo "drift=$drift" >> "$GITHUB_OUTPUT"
+                  {
+                    echo "drift=$drift"
+                    echo "rpc_err=$rpc_err"
+                    echo "fingerprint=$fingerprint"
+                  } >> "$GITHUB_OUTPUT"
                   if [ "$drift" -eq 1 ]; then
                     echo "::error::Live mainnet WASM differs from deployments/mainnet.txt"
                     exit 1
@@ -100,7 +128,7 @@ jobs:
                     exit 1
                   fi
 
-            - name: Keep report for the alert job
+            - name: Keep report for the alert jobs
               if: always()
               uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
               with:
@@ -120,6 +148,7 @@ jobs:
             GH_TOKEN: ${{ github.token }}
             GH_REPO: ${{ github.repository }}
             RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+            FINGERPRINT: ${{ needs.check.outputs.fingerprint }}
             SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
         steps:
             - uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
@@ -127,35 +156,92 @@ jobs:
                   name: mainnet-report
                   path: /tmp/report
 
-            - name: Open or update incident issue
+            - name: Open issue, or comment on the open one for a new drift
               id: issue
               run: |
                   set -euo pipefail
                   label="mainnet-wasm-drift"
+                  marker="<!-- drift-fingerprint:${FINGERPRINT} -->"
                   gh label create "$label" --color B60205 \
                     --description "Live mainnet WASM differs from deployments/mainnet.txt" 2>/dev/null || true
-                  body=$(printf '%s\n\n%s\n\n%s\n\n%s\n' \
-                    "@upshift-protocol/stellar-contracts-owners the live WASM of at least one mainnet contract no longer matches \`deployments/mainnet.txt\`." \
+                  body=$(printf '%s\n\n%s\n\n%s\n\n%s\n\n%s\n' \
+                    "🚨 The live WASM of at least one mainnet contract no longer matches \`deployments/mainnet.txt\`." \
                     "$(cat /tmp/report/report.md)" \
                     "Run: $RUN_URL" \
-                    "If this was an approved upgrade, update \`deployments/mainnet.txt\` in a PR and close this issue. If not, treat it as an incident.")
+                    "If this was an approved upgrade, update \`deployments/mainnet.txt\` in a PR and close this issue. If not, treat it as an incident." \
+                    "$marker")
                   existing=$(gh issue list --label "$label" --state open --json number --jq '.[0].number // empty')
-                  if [ -n "$existing" ]; then
-                    gh issue comment "$existing" --body "Still drifting: $RUN_URL"
-                    echo "new=false" >> "$GITHUB_OUTPUT"
-                  else
-                    url=$(gh issue create --title "🚨 Mainnet WASM hash drift detected" --label "$label" --body "$body")
-                    echo "new=true" >> "$GITHUB_OUTPUT"
+                  if [ -z "$existing" ]; then
+                    url=$(gh issue create --title "🚨 Mainnet WASM hash drift detected" --label "$label" \
+                      --assignee "$ALERT_ASSIGNEES" --body "$body")
+                    echo "notify=true" >> "$GITHUB_OUTPUT"
                     echo "url=$url" >> "$GITHUB_OUTPUT"
+                    exit 0
+                  fi
+                  url=$(gh issue view "$existing" --json url --jq .url)
+                  echo "url=$url" >> "$GITHUB_OUTPUT"
+                  seen=$(gh issue view "$existing" --json body,comments \
+                    --jq "[.body, .comments[].body] | map(select(contains(\"$marker\"))) | length")
+                  if [ "$seen" -eq 0 ]; then
+                    # A drift we have not alerted on yet: full report + re-notify.
+                    gh issue comment "$existing" --body "$body"
+                    gh issue edit "$existing" --add-assignee "$ALERT_ASSIGNEES"
+                    echo "notify=true" >> "$GITHUB_OUTPUT"
+                  else
+                    echo "Drift already reported on #$existing; not re-alerting."
+                    echo "notify=false" >> "$GITHUB_OUTPUT"
                   fi
 
-            # Slack once per incident (when the issue is opened), not every hour.
             - name: Notify Slack
-              if: steps.issue.outputs.new == 'true' && env.SLACK_WEBHOOK_URL != ''
+              if: steps.issue.outputs.notify == 'true'
               env:
                   ISSUE_URL: ${{ steps.issue.outputs.url }}
               run: |
                   set -euo pipefail
+                  if [ -z "${SLACK_WEBHOOK_URL:-}" ]; then
+                    echo "::warning::SLACK_WEBHOOK_URL is not set; drift was only reported as a GitHub issue."
+                    exit 0
+                  fi
                   text=$(printf ':rotating_light: *Mainnet WASM hash drift* on stellar-upshift-vault-contracts. A live vault no longer runs the approved bytecode.\nIssue: %s\nRun: %s' "$ISSUE_URL" "$RUN_URL")
                   payload=$(jq -n --arg t "$text" '{text: $t}')
                   curl -fsS -X POST -H 'Content-Type: application/json' --data "$payload" "$SLACK_WEBHOOK_URL"
+
+    degraded:
+        name: Report monitor degraded
+        needs: check
+        if: always() && needs.check.outputs.drift != '1' && (needs.check.outputs.rpc_err == '1' || needs.check.result == 'failure')
+        runs-on: ubuntu-latest
+        permissions:
+            contents: read
+            issues: write
+        env:
+            GH_TOKEN: ${{ github.token }}
+            GH_REPO: ${{ github.repository }}
+            RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        steps:
+            - name: Open or update degraded issue
+              run: |
+                  set -euo pipefail
+                  label="mainnet-monitor-degraded"
+                  gh label create "$label" --color FBCA04 \
+                    --description "Mainnet monitor could not verify live WASM" 2>/dev/null || true
+                  existing=$(gh issue list --label "$label" --state open --json number --jq '.[0].number // empty')
+                  if [ -n "$existing" ]; then
+                    echo "Already tracked in #$existing"
+                  else
+                    gh issue create --title "Mainnet monitor degraded: could not verify live WASM" \
+                      --label "$label" --assignee "$ALERT_ASSIGNEES" \
+                      --body "The hourly mainnet WASM check could not complete (RPC provider error or job failure), so live bytecode is currently NOT being verified. Run: $RUN_URL. Fix the provider (vars.MAINNET_RPC_PRIMARY / MAINNET_RPC_SECONDARY) and close this issue once runs are green."
+                  fi
+
+    keepalive:
+        name: Keep schedule alive
+        runs-on: ubuntu-latest
+        permissions:
+            actions: write
+        env:
+            GH_TOKEN: ${{ github.token }}
+            GH_REPO: ${{ github.repository }}
+        steps:
+            - name: Re-enable this workflow (resets the 60-day inactivity timer)
+              run: gh api -X PUT "repos/$GH_REPO/actions/workflows/mainnet-monitor.yml/enable"

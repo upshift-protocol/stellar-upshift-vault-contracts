@@ -8,7 +8,8 @@ name: Nightly
 #                 builds, so a new advisory can't always be fixed in the PR
 #                 that hits it). Here it fails loudly so a new RUSTSEC
 #                 advisory against the frozen lockfile is seen within a day.
-#   deep-tests  - the proptest suites at 20x the PR case count.
+#   deep-tests  - the proptest suites at 20000 cases each (PRs run 1024 for
+#                 the preview-math properties, 256 for the executed round trip).
 #
 # Any failure opens (or comments on) a `nightly-failure` issue.
 
@@ -37,7 +38,6 @@ jobs:
         runs-on: ubuntu-latest
         timeout-minutes: 240
         env:
-            # PR runs use 1024 (preview math) / 256 (executed round trip).
             PROPTEST_CASES: "20000"
         steps:
             - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2

@@ -24,7 +24,7 @@ fails; skipped jobs (docs-only PRs) count as passing.
 
 | Workflow | When | What | On failure |
 | --- | --- | --- | --- |
-| `mainnet-monitor.yml` | Hourly | Fetches each contract in `deployments/mainnet.txt` from two RPC providers and compares its sha256 to the approved hash | Opens a `mainnet-wasm-drift` issue pinging the owners team, plus one Slack post per incident (`SLACK_WEBHOOK_URL` secret) |
+| `mainnet-monitor.yml` | Hourly | Fetches each contract in `deployments/mainnet.txt` from two RPC providers and compares its sha256 to the approved hash | **Drift:** `mainnet-wasm-drift` issue assigned to `vars.ALERT_ASSIGNEES` + Slack (`SLACK_WEBHOOK_URL`); each distinct drift re-alerts even if an older issue is open. **RPC failure:** `mainnet-monitor-degraded` issue. Re-enables itself each run so GitHub's 60-day inactivity rule can't turn it off |
 | `nightly.yml` | Daily 03:23 UTC | Strict `cargo deny check advisories`; proptest suites at `PROPTEST_CASES=20000` | Opens or comments on a `nightly-failure` issue |
 | `mutants.yml` | Sundays 04:41 UTC | `cargo-mutants` across the workspace, 8 shards | Report-only: missed mutants in each shard's summary and artifact |
 | `scorecard.yml` | Mondays + pushes to `main` | OpenSSF Scorecard | Results in the Security tab |
