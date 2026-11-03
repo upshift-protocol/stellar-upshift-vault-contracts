@@ -314,10 +314,9 @@ remove_identity() {
     stellar keys rm --force "$1" 2>/dev/null || true
 }
 
-# Replace any identity left over from a previous run with a new key.
+# Create a key, replacing any identity left over from a previous run.
 fresh_identity() {
-    remove_identity "$1"
-    if ! stellar keys generate "$1"; then
+    if ! stellar keys generate --overwrite "$1"; then
         fail "Could not generate key for $1"
         exit 1
     fi
@@ -380,18 +379,19 @@ done
 # ---------------------------------------------------------------------------
 phase 0 "Prerequisites check"
 
+# Must match the protocol of the quickstart image below. A newer major CLI
+# targets a newer protocol, so the major version is matched exactly.
+REQUIRED_STELLAR_CLI_VERSION="30.0.1"
+
 if ! command -v stellar &>/dev/null; then
-    fail "stellar CLI not found. Install with: cargo install stellar-cli --locked --version 30.0.1"
+    fail "stellar CLI not found. Install with: cargo install stellar-cli --locked --version $REQUIRED_STELLAR_CLI_VERSION"
     exit 1
 fi
-# The quickstart image below runs protocol 30, and this script relies on CLI 30
-# behaviour (`keys rm --force`, SAC `approve --live_until_ledger`). Fail here
-# rather than deep in a run with an error that hides the real cause.
-REQUIRED_STELLAR_CLI_MAJOR=30
+# The script also relies on CLI 30 behaviour (`keys rm --force`, SAC
+# `approve --live_until_ledger`), so fail here rather than deep in a run.
 STELLAR_CLI_VERSION=$(stellar --version 2>/dev/null | awk 'NR==1 {print $2}')
-STELLAR_CLI_MAJOR=${STELLAR_CLI_VERSION%%.*}
-if ! [[ "$STELLAR_CLI_MAJOR" =~ ^[0-9]+$ ]] || [ "$STELLAR_CLI_MAJOR" -lt "$REQUIRED_STELLAR_CLI_MAJOR" ]; then
-    fail "stellar CLI ${STELLAR_CLI_VERSION:-unknown} is too old; need ${REQUIRED_STELLAR_CLI_MAJOR}.x. Install with: cargo install stellar-cli --locked --version 30.0.1"
+if [ "${STELLAR_CLI_VERSION%%.*}" != "${REQUIRED_STELLAR_CLI_VERSION%%.*}" ]; then
+    fail "stellar CLI ${STELLAR_CLI_VERSION:-unknown} does not match protocol ${REQUIRED_STELLAR_CLI_VERSION%%.*}; need ${REQUIRED_STELLAR_CLI_VERSION%%.*}.x. Install with: cargo install stellar-cli --locked --version $REQUIRED_STELLAR_CLI_VERSION"
     exit 1
 fi
 log "stellar CLI: $STELLAR_CLI_VERSION"
@@ -427,7 +427,7 @@ else
 
     # Pinned to an immutable protocol 30 build instead of the rolling :testing
     # tag, which can jump to a pre-release host that no released stellar-cli
-    # supports. Keep in lockstep with REQUIRED_STELLAR_CLI_MAJOR above and with
+    # supports. Keep in lockstep with REQUIRED_STELLAR_CLI_VERSION above and with
     # STELLAR_CLI_VERSION and the service image in .github/workflows/ci.yml.
     QUICKSTART_IMAGE="stellar/quickstart:v690-b1601.1-testing"
     log "Starting $QUICKSTART_IMAGE in standalone mode..."

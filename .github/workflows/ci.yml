@@ -19,9 +19,9 @@ concurrency:
     cancel-in-progress: true
 
 # Stellar CLI for the test and e2e jobs. It must speak the same protocol as the
-# quickstart image in the e2e job and scripts/e2e-test.sh. The verify job pins
-# its own CLI on purpose (cliver is part of the attested WASM hash), so do not
-# point it at these.
+# quickstart image in the e2e job and scripts/e2e-test.sh. The
+# reproducible-build job pins its own CLI on purpose (cliver is part of the
+# attested WASM hash), so do not point it at these.
 env:
     STELLAR_CLI_VERSION: "30.0.1"
     STELLAR_CLI_DEB_SHA256: "3f3a42f3e645f44edc38393e28550fee971a4045bbf5b42b650fe76f02a391e9"
@@ -200,6 +200,9 @@ jobs:
                   echo "${STELLAR_CLI_DEB_SHA256}  /tmp/stellar-cli.deb" | sha256sum -c -
                   sudo dpkg -i /tmp/stellar-cli.deb
                   rm /tmp/stellar-cli.deb
+                  # A stellar binary restored with the cached ~/.cargo/bin
+                  # would come first on PATH and shadow the pinned .deb.
+                  rm -f ~/.cargo/bin/stellar
                   echo "stellar CLI: $(stellar --version)"
 
             - name: Optimize WASM
@@ -276,6 +279,9 @@ jobs:
                   echo "${STELLAR_CLI_DEB_SHA256}  /tmp/stellar-cli.deb" | sha256sum -c -
                   sudo dpkg -i /tmp/stellar-cli.deb
                   rm /tmp/stellar-cli.deb
+                  # A stellar binary restored with the cached ~/.cargo/bin
+                  # would come first on PATH and shadow the pinned .deb.
+                  rm -f ~/.cargo/bin/stellar
                   echo "stellar CLI: $(stellar --version)"
 
             - name: Run E2E tests
