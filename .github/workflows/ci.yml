@@ -163,7 +163,6 @@ jobs:
               uses: actions/cache@v4
               with:
                   path: |
-                      ~/.cargo/bin/
                       ~/.cargo/registry/index/
                       ~/.cargo/registry/cache/
                       ~/.cargo/git/db/
@@ -200,9 +199,6 @@ jobs:
                   echo "${STELLAR_CLI_DEB_SHA256}  /tmp/stellar-cli.deb" | sha256sum -c -
                   sudo dpkg -i /tmp/stellar-cli.deb
                   rm /tmp/stellar-cli.deb
-                  # A stellar binary restored with the cached ~/.cargo/bin
-                  # would come first on PATH and shadow the pinned .deb.
-                  rm -f ~/.cargo/bin/stellar
                   echo "stellar CLI: $(stellar --version)"
 
             - name: Optimize WASM
@@ -262,7 +258,6 @@ jobs:
               uses: actions/cache@v4
               with:
                   path: |
-                      ~/.cargo/bin/
                       ~/.cargo/registry/index/
                       ~/.cargo/registry/cache/
                       ~/.cargo/git/db/
@@ -279,9 +274,6 @@ jobs:
                   echo "${STELLAR_CLI_DEB_SHA256}  /tmp/stellar-cli.deb" | sha256sum -c -
                   sudo dpkg -i /tmp/stellar-cli.deb
                   rm /tmp/stellar-cli.deb
-                  # A stellar binary restored with the cached ~/.cargo/bin
-                  # would come first on PATH and shadow the pinned .deb.
-                  rm -f ~/.cargo/bin/stellar
                   echo "stellar CLI: $(stellar --version)"
 
             - name: Run E2E tests
