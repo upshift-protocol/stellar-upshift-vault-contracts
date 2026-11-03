@@ -7612,7 +7612,7 @@ fn setup_proptest_state(
 }
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(1024))]
+    #![proptest_config(ProptestConfig::with_cases(proptest_cases(1024)))]
 
     /// preview_deposit floors AND `preview_redeem(preview_deposit(x)) ≤ x`
     /// across all valid offsets, with an optional loss regime mixed in.
@@ -7681,5 +7681,75 @@ proptest! {
         let pow = 10_i128.pow(offset);
         let s = setup_proptest_state(offset, deposit_seed, extracted_pct, deployed_extra);
         assert_preview_withdraw_ceils(&s, pow, assets_in);
+    }
+}
+
+// -- S.4: executed round-trip properties (state-changing, not preview) --
+//
+// The S.3 sweep checks the `preview_*` math. These run the real `deposit` /
+// `redeem` entry points against the same randomized vault states and assert
+// the economic invariants directly on token balances:
+//
+//   1. no-profit round trip: a fresh depositor who deposits `x` and redeems
+//      every share they can never receives more than `x` back;
+//   2. no value extraction: that round trip never lowers what the existing
+//      holder's shares are worth (`preview_redeem` of their balance).
+//
+// Case count defaults to 256 per property and is raised by the nightly
+// `deep-tests` workflow via `PROPTEST_CASES` (see .github/workflows/scheduled.yml).
+
+fn proptest_cases(default: u32) -> u32 {
+    std::env::var("PROPTEST_CASES")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(default)
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(proptest_cases(256)))]
+
+    #[test]
+    fn proptest_executed_round_trip_no_profit_no_extraction(
+        offset in 3u32..=10,
+        deposit_seed in 0i128..1_000_000_000_000_i128,
+        deployed_extra in 0i128..1_000_000_000_000_i128,
+        extracted_pct in 0u32..=100,
+        x in 1i128..1_000_000_000_i128,
+    ) {
+        let s = setup_proptest_state(offset, deposit_seed, extracted_pct, deployed_extra);
+        // `deposit` rejects zero-share mints; those inputs are covered by S.3.
+        prop_assume!(s.vault_client.preview_deposit(&x) > 0);
+
+        let holder_shares = s.vault_client.balance(&s.user);
+        let holder_value_before = s.vault_client.preview_redeem(&holder_shares);
+
+        let attacker = Address::generate(&s.e);
+        s.asset_client.transfer(&s.admin, &attacker, &x);
+        let minted = s.vault_client.deposit(&x, &attacker, &attacker, &attacker);
+        prop_assert_eq!(s.vault_client.balance(&attacker), minted);
+
+        // Redeem as much as liquidity allows (deployed capital is not local).
+        let redeemable = s.vault_client.max_redeem(&attacker);
+        if redeemable > 0 && s.vault_client.preview_redeem(&redeemable) > 0 {
+            s.vault_client
+                .redeem(&redeemable, &attacker, &attacker, &attacker);
+        }
+
+        let got_back = s.asset_client.balance(&attacker);
+        let leftover_value = s
+            .vault_client
+            .preview_redeem(&s.vault_client.balance(&attacker));
+        prop_assert!(
+            got_back + leftover_value <= x,
+            "round trip profited: x={}, got_back={}, leftover_value={}",
+            x, got_back, leftover_value,
+        );
+
+        let holder_value_after = s.vault_client.preview_redeem(&holder_shares);
+        prop_assert!(
+            holder_value_after >= holder_value_before,
+            "existing holder diluted: before={}, after={}",
+            holder_value_before, holder_value_after,
+        );
     }
 }
