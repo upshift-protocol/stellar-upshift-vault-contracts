@@ -1,14 +1,5 @@
 [advisories]
 unmaintained = "workspace"
-ignore = [
-    # crypto-bigint 0.5.5: non-constant-time arithmetic. Reached only through
-    # soroban-env-host (k256/p256), i.e. the host / test environment. It is NOT
-    # in either contract's WASM (`cargo tree --target wasm32v1-none -i
-    # crypto-bigint` is empty) and the contracts handle no secrets. The fix is
-    # in 0.7.6+ and needs a soroban-sdk bump, which changes the attested hashes.
-    # Revisit on the next SDK upgrade.
-    { id = "RUSTSEC-2026-0387", reason = "host/test-only dependency, not in contract WASM; fix requires soroban-sdk bump" },
-]
 
 [licenses]
 allow = ["Apache-2.0", "Apache-2.0 WITH LLVM-exception", "MIT", "BSD-2-Clause", "BSD-3-Clause", "Unicode-3.0", "Zlib"]

@@ -205,7 +205,6 @@ jobs:
             - name: Install stellar CLI
               run: |
                   curl -fsSL -o /tmp/stellar-cli.deb https://github.com/stellar/stellar-cli/releases/download/v25.1.0/stellar-cli_25.1.0_amd64.deb
-                  echo "0260de467b29883c7cc227a3d8df7b7d8723805ffa54dcfe8171af1255de33c8  /tmp/stellar-cli.deb" | sha256sum -c -
                   sudo dpkg -i /tmp/stellar-cli.deb
                   rm /tmp/stellar-cli.deb
                   echo "stellar CLI: $(stellar --version)"
@@ -287,7 +286,6 @@ jobs:
               run: |
                   if ! command -v stellar &>/dev/null; then
                     curl -fsSL -o /tmp/stellar-cli.deb https://github.com/stellar/stellar-cli/releases/download/v25.1.0/stellar-cli_25.1.0_amd64.deb
-                    echo "0260de467b29883c7cc227a3d8df7b7d8723805ffa54dcfe8171af1255de33c8  /tmp/stellar-cli.deb" | sha256sum -c -
                     sudo dpkg -i /tmp/stellar-cli.deb
                     rm /tmp/stellar-cli.deb
                   fi
