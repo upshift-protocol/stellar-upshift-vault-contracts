@@ -4,9 +4,9 @@
 # requires an approving review from a code owner, enforced for admins too,
 # and the most recent push must be approved by someone other than its pusher.
 #
-# Ownership is held by a team (@upshift-protocol/stellar-contracts-owners:
-# gr-august, ae2212, cjeva10), so on/offboarding is a team membership change,
-# not a commit here. The team needs Write access for this file to be valid.
+# Ownership is held by a team (@upshift-protocol/stellar-contracts-owners),
+# so on/offboarding is a team membership change, not a commit here. The team
+# needs Write access for this file to be valid.
 #
 # Rules: the LAST matching pattern wins, so `*` stays first. Any one owner
 # listed on a line can approve; CODEOWNERS cannot require two approvals.

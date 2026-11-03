@@ -16,11 +16,7 @@ Use the same pinned toolchain as the release build (Rust 1.95.0, Stellar CLI
 27.0.0; see VERIFY.md § B):
 
 ```bash
-for pkg in august-vault xlm-strategy; do
-  stellar contract build --optimize --package "$pkg" --out-dir "out-$pkg"
-  stellar contract info interface --wasm "out-$pkg"/*.wasm --output rust \
-    > "interfaces/$pkg.rs"
-done
+make interfaces
 ```
 
 If you can't run CLI 27.0.0 locally, take the `diff -u` output that the failing

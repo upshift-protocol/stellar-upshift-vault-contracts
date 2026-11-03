@@ -1,28 +1,13 @@
 name: Mainnet Monitor
 
-# Hourly check that every live mainnet contract still runs the approved WASM.
-#
-# The vaults are upgradeable: the admin can replace the bytecode at any time.
-# This workflow fetches each contract's live WASM from TWO independent RPC
-# providers, hashes it, and compares it to deployments/mainnet.txt.
-#
-#   drift     -> `mainnet-wasm-drift` issue, assigned to ALERT_ASSIGNEES, plus a
-#                Slack post. Every DISTINCT drift (a new contract/hash pair) is
-#                alerted, even while an older drift issue is still open.
-#   RPC error -> `mainnet-monitor-degraded` issue (assigned, no Slack), so a
-#                dead provider can't silently turn the monitor off.
-#   keepalive -> GitHub disables schedules in public repos after 60 days with
-#                no repository activity; each run re-enables this workflow via
-#                the API to reset that timer.
-#
-# Repo configuration:
-#   secrets.SLACK_WEBHOOK_URL   Slack incoming webhook (strongly recommended)
-#   vars.ALERT_ASSIGNEES        comma-separated logins (default below)
-#   vars.MAINNET_RPC_PRIMARY / vars.MAINNET_RPC_SECONDARY  RPC overrides
+# Hourly check that every live mainnet contract still runs the approved WASM
+# (deployments/mainnet.txt), fetched from two independent RPC providers.
+# Alerting, configuration and keepalive are documented in docs/CI.md.
 
 on:
     schedule:
         - cron: "17 * * * *"
+        - cron: "47 6 * * 1" # weekly: also runs the keepalive job
     workflow_dispatch:
 
 permissions:
@@ -33,6 +18,8 @@ concurrency:
     cancel-in-progress: false
 
 env:
+    # Issues are assigned (a bot's @team mention does not notify). Keep this
+    # default in step with the stellar-contracts-owners team, or set the var.
     ALERT_ASSIGNEES: ${{ vars.ALERT_ASSIGNEES || 'gr-august,ae2212,cjeva10' }}
 
 jobs:
@@ -53,21 +40,16 @@ jobs:
               with:
                   persist-credentials: false
 
-            - name: Install Stellar CLI 27.0.0 (pinned .deb, checksum-verified)
-              env:
-                  STELLAR_CLI_DEB_SHA256: "4b3755e13ba7514a108e422b02c75233face37c3e2cde131f55e6c7ce6eea44e"
-              run: |
-                  set -euo pipefail
-                  curl -fsSL -o /tmp/stellar-cli.deb \
-                    https://github.com/stellar/stellar-cli/releases/download/v27.0.0/stellar-cli_27.0.0_amd64.deb
-                  echo "${STELLAR_CLI_DEB_SHA256}  /tmp/stellar-cli.deb" | sha256sum -c -
-                  sudo dpkg -i /tmp/stellar-cli.deb
+            - uses: ./.github/actions/install-stellar-cli
+              with:
+                  version: "27.0.0"
+                  sha256: "4b3755e13ba7514a108e422b02c75233face37c3e2cde131f55e6c7ce6eea44e"
 
             - name: Compare live hashes to deployments/mainnet.txt
               id: check
               run: |
                   set -uo pipefail
-                  drift=0; rpc_err=0
+                  rpc_err=0
                   report=/tmp/report.md
                   drifted=/tmp/drifted.txt
                   : > "$drifted"
@@ -80,7 +62,7 @@ jobs:
                     local tag out
                     tag=$(echo "$1" | sha256sum | cut -c1-8)
                     out="/tmp/$2-$tag.wasm"
-                    if stellar contract fetch --id "$2" --rpc-url "$1" \
+                    if timeout 60 stellar contract fetch --id "$2" --rpc-url "$1" \
                          --network-passphrase "$NETWORK_PASSPHRASE" --out-file "$out" >/dev/null 2>&1; then
                       sha256sum "$out" | cut -d' ' -f1
                     else
@@ -102,7 +84,7 @@ jobs:
                       fi
                     done
                     # Drift outranks an RPC error in the status label.
-                    if [ "$this_drift" -eq 1 ]; then status="🚨 DRIFT"; drift=1
+                    if [ "$this_drift" -eq 1 ]; then status="🚨 DRIFT"
                     elif [ "$this_err" -eq 1 ]; then status="⚠️ RPC error"; rpc_err=1
                     else status="✅"; fi
                     echo "$status $name $id expected=$expected primary=$a secondary=$b"
@@ -112,6 +94,7 @@ jobs:
                   # Identifies WHICH contract moved to WHICH hash, so a new drift
                   # is alerted even if an older drift issue is still open.
                   fingerprint=$(sort -u "$drifted" | sha256sum | cut -c1-16)
+                  drift=0; [ -s "$drifted" ] && drift=1
 
                   cat "$report" >> "$GITHUB_STEP_SUMMARY"
                   {
@@ -148,58 +131,36 @@ jobs:
             GH_TOKEN: ${{ github.token }}
             GH_REPO: ${{ github.repository }}
             RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-            FINGERPRINT: ${{ needs.check.outputs.fingerprint }}
-            SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
         steps:
+            - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+              with:
+                  persist-credentials: false
+
             - uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
               with:
                   name: mainnet-report
                   path: /tmp/report
 
+            # One issue per incident; a NEW distinct drift (different contract or
+            # hash => different fingerprint) is re-posted and re-notified.
             - name: Open issue, or comment on the open one for a new drift
               id: issue
+              env:
+                  FINGERPRINT: ${{ needs.check.outputs.fingerprint }}
               run: |
-                  set -euo pipefail
-                  label="mainnet-wasm-drift"
-                  marker="<!-- drift-fingerprint:${FINGERPRINT} -->"
-                  gh label create "$label" --color B60205 \
-                    --description "Live mainnet WASM differs from deployments/mainnet.txt" 2>/dev/null || true
-                  body=$(printf '%s\n\n%s\n\n%s\n\n%s\n\n%s\n' \
+                  body=$(printf '%s\n\n%s\n\n%s\n\n%s\n' \
                     "🚨 The live WASM of at least one mainnet contract no longer matches \`deployments/mainnet.txt\`." \
                     "$(cat /tmp/report/report.md)" \
                     "Run: $RUN_URL" \
-                    "If this was an approved upgrade, update \`deployments/mainnet.txt\` in a PR and close this issue. If not, treat it as an incident." \
-                    "$marker")
-                  # Only trust issues opened by this workflow's bot: anyone can
-                  # comment on a public repo, so markers are read from bot-authored
-                  # text only, or an attacker could pre-post one to mute an alert.
-                  existing=$(gh issue list --label "$label" --state open --author "app/github-actions" \
-                    --json number --jq '.[0].number // empty')
-                  if [ -z "$existing" ]; then
-                    url=$(gh issue create --title "🚨 Mainnet WASM hash drift detected" --label "$label" \
-                      --assignee "$ALERT_ASSIGNEES" --body "$body")
-                    echo "notify=true" >> "$GITHUB_OUTPUT"
-                    echo "url=$url" >> "$GITHUB_OUTPUT"
-                    exit 0
-                  fi
-                  url=$(gh issue view "$existing" --json url --jq .url)
-                  echo "url=$url" >> "$GITHUB_OUTPUT"
-                  seen=$(gh issue view "$existing" --json body,comments --jq \
-                    "[.body, (.comments[] | select(.author.login == \"github-actions\") | .body)] | map(select(contains(\"$marker\"))) | length")
-                  if [ "$seen" -eq 0 ]; then
-                    # A drift we have not alerted on yet: full report + re-notify.
-                    gh issue comment "$existing" --body "$body"
-                    gh issue edit "$existing" --add-assignee "$ALERT_ASSIGNEES"
-                    echo "notify=true" >> "$GITHUB_OUTPUT"
-                  else
-                    echo "Drift already reported on #$existing; not re-alerting."
-                    echo "notify=false" >> "$GITHUB_OUTPUT"
-                  fi
+                    "If this was an approved upgrade, update \`deployments/mainnet.txt\` in a PR and close this issue. If not, treat it as an incident.")
+                  scripts/ci/upsert-issue.sh mainnet-wasm-drift B60205 \
+                    "🚨 Mainnet WASM hash drift detected" "$body" "drift-fingerprint:${FINGERPRINT}"
 
             - name: Notify Slack
-              if: steps.issue.outputs.notify == 'true'
+              if: steps.issue.outputs.action != 'seen'
               env:
                   ISSUE_URL: ${{ steps.issue.outputs.url }}
+                  SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
               run: |
                   set -euo pipefail
                   if [ -z "${SLACK_WEBHOOK_URL:-}" ]; then
@@ -223,23 +184,23 @@ jobs:
             GH_REPO: ${{ github.repository }}
             RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         steps:
-            - name: Open or update degraded issue
-              run: |
-                  set -euo pipefail
-                  label="mainnet-monitor-degraded"
-                  gh label create "$label" --color FBCA04 \
-                    --description "Mainnet monitor could not verify live WASM" 2>/dev/null || true
-                  existing=$(gh issue list --label "$label" --state open --author "app/github-actions" --json number --jq '.[0].number // empty')
-                  if [ -n "$existing" ]; then
-                    echo "Already tracked in #$existing"
-                  else
-                    gh issue create --title "Mainnet monitor degraded: could not verify live WASM" \
-                      --label "$label" --assignee "$ALERT_ASSIGNEES" \
-                      --body "The hourly mainnet WASM check could not complete (RPC provider error or job failure), so live bytecode is currently NOT being verified. Run: $RUN_URL. Fix the provider (vars.MAINNET_RPC_PRIMARY / MAINNET_RPC_SECONDARY) and close this issue once runs are green."
-                  fi
+            - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+              with:
+                  persist-credentials: false
 
+            # Constant marker: open once, then stay quiet until closed.
+            - name: Open degraded issue
+              run: |
+                  scripts/ci/upsert-issue.sh mainnet-monitor-degraded FBCA04 \
+                    "Mainnet monitor degraded: could not verify live WASM" \
+                    "The hourly mainnet WASM check could not complete (RPC provider error or job failure), so live bytecode is currently NOT being verified. Run: $RUN_URL. Fix the provider (vars.MAINNET_RPC_PRIMARY / MAINNET_RPC_SECONDARY) and close this issue once runs are green." \
+                    "monitor-degraded"
+
+    # GitHub disables schedules in public repos after 60 days without repository
+    # activity. Weekly, re-enable every scheduled workflow to reset that timer.
     keepalive:
-        name: Keep schedule alive
+        name: Keep schedules alive
+        if: github.event.schedule == '47 6 * * 1'
         runs-on: ubuntu-latest
         permissions:
             actions: write
@@ -247,5 +208,10 @@ jobs:
             GH_TOKEN: ${{ github.token }}
             GH_REPO: ${{ github.repository }}
         steps:
-            - name: Re-enable this workflow (resets the 60-day inactivity timer)
-              run: gh api -X PUT "repos/$GH_REPO/actions/workflows/mainnet-monitor.yml/enable"
+            - name: Re-enable scheduled workflows
+              run: |
+                  set -euo pipefail
+                  for wf in mainnet-monitor.yml nightly.yml mutants.yml scorecard.yml; do
+                    gh api -X PUT "repos/$GH_REPO/actions/workflows/$wf/enable"
+                    echo "re-enabled $wf"
+                  done

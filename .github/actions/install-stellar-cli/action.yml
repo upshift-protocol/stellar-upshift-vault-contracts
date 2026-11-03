@@ -1,0 +1,27 @@
+name: Install Stellar CLI (pinned, checksum-verified)
+description: >-
+    Download a specific stellar-cli .deb release, verify its sha256, and install
+    it. Single place to bump the CLI version + checksum for the jobs that use it.
+inputs:
+    version:
+        description: stellar-cli version, without the leading v
+        required: true
+    sha256:
+        description: expected sha256 of stellar-cli_<version>_amd64.deb
+        required: true
+runs:
+    using: composite
+    steps:
+        - shell: bash
+          env:
+              VERSION: ${{ inputs.version }}
+              SHA256: ${{ inputs.sha256 }}
+          run: |
+              set -euo pipefail
+              deb="$RUNNER_TEMP/stellar-cli.deb"
+              curl -fsSL -o "$deb" \
+                "https://github.com/stellar/stellar-cli/releases/download/v${VERSION}/stellar-cli_${VERSION}_amd64.deb"
+              echo "${SHA256}  $deb" | sha256sum -c -
+              sudo dpkg -i "$deb"
+              rm -f "$deb"
+              stellar --version

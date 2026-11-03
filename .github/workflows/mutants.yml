@@ -6,7 +6,7 @@ name: Mutation Testing
 #
 # Report-only: surviving ("missed") mutants are listed in each shard's job
 # summary and uploaded as an artifact for triage. Sharded so the full run fits
-# comfortably in runner time limits.
+# comfortably in runner time limits. The shard count is the matrix length.
 
 on:
     schedule:
@@ -18,7 +18,7 @@ permissions:
 
 jobs:
     mutants:
-        name: cargo-mutants (shard ${{ matrix.shard }}/8)
+        name: cargo-mutants (shard ${{ matrix.shard }}/${{ strategy.job-total }})
         runs-on: ubuntu-latest
         timeout-minutes: 300
         strategy:
@@ -41,13 +41,28 @@ jobs:
               with:
                   tool: cargo-mutants@27.1.0
 
+            - name: Cache Cargo
+              uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+              with:
+                  path: |
+                      ~/.cargo/registry/index/
+                      ~/.cargo/registry/cache/
+                      ~/.cargo/git/db/
+                      target/
+                  key: ${{ runner.os }}-cargo-mutants-${{ hashFiles('**/Cargo.lock') }}
+                  restore-keys: |
+                      ${{ runner.os }}-cargo-mutants-
+
             - name: Run cargo-mutants
               env:
                   SHARD: ${{ matrix.shard }}
+                  TOTAL: ${{ strategy.job-total }}
               run: |
                   set -uo pipefail
-                  cargo mutants --workspace --shard "${SHARD}/8" --no-shuffle \
-                    --timeout-multiplier 3 --output "mutants-${SHARD}"
+                  # Only shard 0 checks the unmutated baseline; the rest skip it.
+                  baseline=$([ "$SHARD" -eq 0 ] && echo run || echo skip)
+                  cargo mutants --workspace --shard "${SHARD}/${TOTAL}" --no-shuffle \
+                    --baseline "$baseline" --timeout-multiplier 3 --output "mutants-${SHARD}"
                   code=$?
                   # 0 = all caught, 2 = missed mutants, 3 = timeouts: report, don't fail.
                   case "$code" in 0|2|3) ;; *) exit "$code" ;; esac
@@ -56,10 +71,11 @@ jobs:
               if: always()
               env:
                   SHARD: ${{ matrix.shard }}
+                  TOTAL: ${{ strategy.job-total }}
               run: |
                   dir="mutants-${SHARD}/mutants.out"
                   {
-                    echo "### cargo-mutants shard ${SHARD}/8"
+                    echo "### cargo-mutants shard ${SHARD}/${TOTAL}"
                     for f in caught missed timeout unviable; do
                       n=$(wc -l < "$dir/$f.txt" 2>/dev/null || echo 0)
                       echo "- **$f**: $n"

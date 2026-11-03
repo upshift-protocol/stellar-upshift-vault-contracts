@@ -24,10 +24,24 @@ fails; skipped jobs (docs-only PRs) count as passing.
 
 | Workflow | When | What | On failure |
 | --- | --- | --- | --- |
-| `mainnet-monitor.yml` | Hourly | Fetches each contract in `deployments/mainnet.txt` from two RPC providers and compares its sha256 to the approved hash | **Drift:** `mainnet-wasm-drift` issue assigned to `vars.ALERT_ASSIGNEES` + Slack (`SLACK_WEBHOOK_URL`); each distinct drift re-alerts even if an older issue is open. **RPC failure:** `mainnet-monitor-degraded` issue. Re-enables itself each run so GitHub's 60-day inactivity rule can't turn it off |
-| `nightly.yml` | Daily 03:23 UTC | Strict `cargo deny check advisories`; proptest suites at `PROPTEST_CASES=20000` | Opens or comments on a `nightly-failure` issue |
+| `mainnet-monitor.yml` | Hourly | Fetches each contract in `deployments/mainnet.txt` from two RPC providers and compares its sha256 to the approved hash | **Drift:** `mainnet-wasm-drift` issue assigned to `ALERT_ASSIGNEES` + Slack; each distinct drift re-alerts even if an older issue is open. **RPC failure:** `mainnet-monitor-degraded` issue. Weekly, re-enables every scheduled workflow so GitHub's 60-day inactivity rule can't turn them off |
+| `nightly.yml` | Daily 03:23 UTC | Strict `cargo deny check advisories`; full test suite at `PROPTEST_CASES=20000` | Opens or comments on a `nightly-failure` issue |
 | `mutants.yml` | Sundays 04:41 UTC | `cargo-mutants` across the workspace, 8 shards | Report-only: missed mutants in each shard's summary and artifact |
 | `scorecard.yml` | Mondays + pushes to `main` | OpenSSF Scorecard | Results in the Security tab |
+
+Alert issues are opened through `scripts/ci/upsert-issue.sh`, which only trusts
+issues and comments written by the `github-actions` bot.
+
+### Monitor configuration
+
+| Setting | Purpose |
+| --- | --- |
+| `secrets.SLACK_WEBHOOK_URL` | Slack incoming webhook for drift alerts (strongly recommended) |
+| `vars.ALERT_ASSIGNEES` | Comma-separated logins to assign; defaults to the owners team members |
+| `vars.MAINNET_RPC_PRIMARY`, `vars.MAINNET_RPC_SECONDARY` | RPC provider overrides |
+
+The Stellar CLI used by Reproducible Build and the monitor is installed by
+`.github/actions/install-stellar-cli` (pinned version + sha256).
 
 ## Approved-state files
 

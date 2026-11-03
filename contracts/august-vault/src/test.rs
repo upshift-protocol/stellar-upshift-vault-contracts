@@ -7723,9 +7723,7 @@ proptest! {
         let holder_shares = s.vault_client.balance(&s.user);
         let holder_value_before = s.vault_client.preview_redeem(&holder_shares);
 
-        let attacker = Address::generate(&s.e);
-        s.asset_client.transfer(&s.admin, &attacker, &x);
-        let minted = s.vault_client.deposit(&x, &attacker, &attacker, &attacker);
+        let (attacker, minted) = s.fund_vault(x);
         prop_assert_eq!(s.vault_client.balance(&attacker), minted);
 
         // Redeem as much as liquidity allows (deployed capital is not local).
