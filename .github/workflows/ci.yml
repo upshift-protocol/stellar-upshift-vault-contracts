@@ -18,6 +18,14 @@ concurrency:
     group: ${{ github.workflow }}-${{ github.ref }}
     cancel-in-progress: true
 
+# Stellar CLI for the test and e2e jobs. It must speak the same protocol as the
+# quickstart image in the e2e job and scripts/e2e-test.sh. The verify job pins
+# its own CLI on purpose (cliver is part of the attested WASM hash), so do not
+# point it at these.
+env:
+    STELLAR_CLI_VERSION: "30.0.1"
+    STELLAR_CLI_DEB_SHA256: "3f3a42f3e645f44edc38393e28550fee971a4045bbf5b42b650fe76f02a391e9"
+
 jobs:
     # ============================================
     # Detect whether any non-docs files changed
@@ -184,13 +192,11 @@ jobs:
                     fi
                   fi
 
-            - name: Install Stellar CLI 30.0.1 (pinned .deb, checksum-verified)
-              env:
-                  STELLAR_CLI_DEB_SHA256: "3f3a42f3e645f44edc38393e28550fee971a4045bbf5b42b650fe76f02a391e9"
+            - name: Install Stellar CLI (pinned .deb, checksum-verified)
               run: |
                   set -euo pipefail
                   curl -fsSL -o /tmp/stellar-cli.deb \
-                    https://github.com/stellar/stellar-cli/releases/download/v30.0.1/stellar-cli_30.0.1_amd64.deb
+                    "https://github.com/stellar/stellar-cli/releases/download/v${STELLAR_CLI_VERSION}/stellar-cli_${STELLAR_CLI_VERSION}_amd64.deb"
                   echo "${STELLAR_CLI_DEB_SHA256}  /tmp/stellar-cli.deb" | sha256sum -c -
                   sudo dpkg -i /tmp/stellar-cli.deb
                   rm /tmp/stellar-cli.deb
@@ -226,15 +232,9 @@ jobs:
 
         services:
             stellar:
-                # Pinned to an immutable quickstart build (protocol 30, core
-                # and RPC v30.0.0) instead of the rolling :testing tag, which
-                # can jump to a pre-release host that no released stellar-cli
-                # supports. Protocol 30 (Bell) is what testnet and mainnet run
-                # after the Nov 2026 votes; the contracts are still built with
-                # soroban-sdk 25, so this run also checks that the deployed
-                # WASM behaves the same on a P30 host. Keep this in lockstep
-                # with the stellar-cli installed below (v30.0.1) and the image
-                # in scripts/e2e-test.sh.
+                # Immutable protocol 30 build, not the rolling :testing tag.
+                # Keep in lockstep with STELLAR_CLI_VERSION above and
+                # QUICKSTART_IMAGE in scripts/e2e-test.sh.
                 image: stellar/quickstart:v690-b1601.1-testing
                 ports:
                     - 8000:8000
@@ -268,13 +268,11 @@ jobs:
                   restore-keys: |
                       ${{ runner.os }}-cargo-e2e-
 
-            - name: Install Stellar CLI 30.0.1 (pinned .deb, checksum-verified)
-              env:
-                  STELLAR_CLI_DEB_SHA256: "3f3a42f3e645f44edc38393e28550fee971a4045bbf5b42b650fe76f02a391e9"
+            - name: Install Stellar CLI (pinned .deb, checksum-verified)
               run: |
                   set -euo pipefail
                   curl -fsSL -o /tmp/stellar-cli.deb \
-                    https://github.com/stellar/stellar-cli/releases/download/v30.0.1/stellar-cli_30.0.1_amd64.deb
+                    "https://github.com/stellar/stellar-cli/releases/download/v${STELLAR_CLI_VERSION}/stellar-cli_${STELLAR_CLI_VERSION}_amd64.deb"
                   echo "${STELLAR_CLI_DEB_SHA256}  /tmp/stellar-cli.deb" | sha256sum -c -
                   sudo dpkg -i /tmp/stellar-cli.deb
                   rm /tmp/stellar-cli.deb
