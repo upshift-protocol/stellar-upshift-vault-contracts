@@ -456,8 +456,9 @@ jobs:
     #
     # CoinFabrik Scout detects Soroban footguns clippy can't see (unchecked
     # auth, unsafe unwrap/expect, unbounded storage, integer issues). Findings
-    # go to the job summary + artifact and do not gate merges (not in CI Pass).
-    # The job fails only if Scout itself breaks (no report produced).
+    # are split into NEW vs reviewed (.github/scout-baseline.json) in the job
+    # summary; new criticals are annotated. Nothing here gates merges (not in
+    # CI Pass); the job fails only if Scout itself breaks (no report).
     #
     # Runs the coinfabrik/scout image directly (pinned by digest) rather than
     # through scout-actions, because it needs one workaround: Scout's dylint
@@ -506,13 +507,13 @@ jobs:
                       -e GIT_CONFIG_KEY_0=core.hooksPath \
                       -e GIT_CONFIG_VALUE_0=/scout-hooks \
                       -e INPUT_TARGET="contracts/$pkg" \
-                      -e INPUT_SCOUT_ARGS="--output-format md-gh --output-path /output/report.md --cicd /output" \
+                      -e INPUT_SCOUT_ARGS="--output-format json --output-path /output/report.json --cicd /output" \
                       "$SCOUT_IMAGE"
                     mkdir -p scout
-                    if [ -f "$out/report.md" ]; then
-                      cp "$out/report.md" "scout/$pkg.md"
-                      echo "## Scout: $pkg" >> "$GITHUB_STEP_SUMMARY"
-                      cat "$out/report.md" >> "$GITHUB_STEP_SUMMARY"
+                    if [ -f "$out/report.json" ]; then
+                      cp "$out/report.json" "scout/$pkg.json"
+                      scripts/ci/scout-triage.sh "scout/$pkg.json" .github/scout-baseline.json \
+                        "$pkg" "$GITHUB_STEP_SUMMARY" || broken=1
                     else
                       echo "::error::Scout produced no report for $pkg (tool failure, see log above)"
                       broken=1

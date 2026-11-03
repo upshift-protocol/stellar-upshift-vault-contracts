@@ -18,7 +18,7 @@ fails; skipped jobs (docs-only PRs) count as passing.
 | Code Coverage (PRs) | Line coverage below 80% |
 | Reproducible Build | Built WASM ≠ `reproducible-hashes.txt`, **or** public interface ≠ `interfaces/<pkg>.rs` |
 | Workflow Lint | actionlint + zizmor on the workflows themselves (template injection, unpinned actions, broad permissions) |
-| Scout (advisory, not in `CI Pass`) | Soroban-specific static analysis; report in the job summary. Make blocking once the baseline is triaged |
+| Scout (advisory, not in `CI Pass`) | Soroban-specific static analysis. The job summary separates **new** findings from ones reviewed in `.github/scout-baseline.json`; new criticals get a PR annotation. Fails only if Scout itself breaks |
 
 ## Scheduled
 
@@ -50,6 +50,7 @@ them is how an intended change gets approved:
 
 - `reproducible-hashes.txt`: expected release WASM hashes.
 - `interfaces/<pkg>.rs`: expected public contract interface (see `interfaces/README.md`).
+- `.github/scout-baseline.json`: Scout findings reviewed as false positives, each with its reason. Matched on detector + file + code fragment, so a new finding is never hidden by an old entry.
 - `deployments/mainnet.txt`: expected live mainnet WASM. **Update it in a PR after an approved upgrade**, or the monitor keeps alerting.
 
 ## Repository settings (not in git)
