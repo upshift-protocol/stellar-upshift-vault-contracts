@@ -1,0 +1,88 @@
+name: Nightly
+
+# Checks that are too slow for every PR, or that can start failing without any
+# change to this repo:
+#
+#   advisories  - cargo-deny advisories, STRICT. On PRs this check is
+#                 continue-on-error (Cargo.lock is frozen for reproducible
+#                 builds, so a new advisory can't always be fixed in the PR
+#                 that hits it). Here it fails loudly so a new RUSTSEC
+#                 advisory against the frozen lockfile is seen within a day.
+#   deep-tests  - the whole test suite with PROPTEST_CASES=20000 (PRs use the
+#                 per-suite defaults in the tests).
+#
+# Any failure opens (or comments on) a `nightly-failure` issue.
+
+on:
+    schedule:
+        - cron: "23 3 * * *"
+    workflow_dispatch:
+
+permissions:
+    contents: read
+
+jobs:
+    advisories:
+        name: Cargo Deny advisories (strict)
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+              with:
+                  persist-credentials: false
+            - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+              with:
+                  command: check advisories
+
+    deep-tests:
+        name: Deep property tests
+        runs-on: ubuntu-latest
+        timeout-minutes: 240
+        env:
+            PROPTEST_CASES: "20000"
+            # Optimized but keeps overflow checks + debug assertions (unlike
+            # --release, which is opt-level z with debug-assertions off).
+            CARGO_PROFILE_DEV_OPT_LEVEL: "2"
+        steps:
+            - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+              with:
+                  persist-credentials: false
+
+            - name: Setup Rust
+              uses: dtolnay/rust-toolchain@035fceb3c12fb0c6a9461b52775e16473133e591 # 1.95.0
+
+            - name: Cache Cargo
+              uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+              with:
+                  path: |
+                      ~/.cargo/registry/index/
+                      ~/.cargo/registry/cache/
+                      ~/.cargo/git/db/
+                      target/
+                  key: ${{ runner.os }}-cargo-nightly-${{ hashFiles('**/Cargo.lock') }}
+                  restore-keys: |
+                      ${{ runner.os }}-cargo-nightly-
+
+            - name: Run tests with deep property testing
+              run: cargo test --workspace
+
+    report:
+        name: Report failure
+        needs: [advisories, deep-tests]
+        if: failure()
+        runs-on: ubuntu-latest
+        permissions:
+            contents: read
+            issues: write
+        env:
+            GH_TOKEN: ${{ github.token }}
+            GH_REPO: ${{ github.repository }}
+            RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        steps:
+            - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+              with:
+                  persist-credentials: false
+
+            - name: Open or update issue
+              run: |
+                  scripts/ci/upsert-issue.sh nightly-failure D93F0B "Nightly checks failing" \
+                    "The nightly run (strict advisories / deep property tests) failed: $RUN_URL"
