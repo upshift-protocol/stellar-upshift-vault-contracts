@@ -12,7 +12,7 @@
 # Prerequisites:
 #   - Docker (unless --ci)
 #   - curl
-#   - stellar CLI (cargo install stellar-cli --locked)
+#   - stellar CLI 30.x (cargo install stellar-cli --locked --version 30.0.1)
 #   - Rust wasm32-unknown-unknown target (rustup target add wasm32-unknown-unknown)
 # =============================================================================
 set -euo pipefail
@@ -307,6 +307,22 @@ get_address() {
     echo "$addr"
 }
 
+# Identities created by fresh_identity, removed again by cleanup on exit.
+CREATED_IDENTITIES=()
+
+remove_identity() {
+    stellar keys rm --force "$1" 2>/dev/null || true
+}
+
+# Create a key, replacing any identity left over from a previous run.
+fresh_identity() {
+    if ! stellar keys generate --overwrite "$1"; then
+        fail "Could not generate key for $1"
+        exit 1
+    fi
+    CREATED_IDENTITIES+=("$1")
+}
+
 cleanup() {
     rm -f "$STDERR_FILE"
     if [ "$DOCKER_MANAGED" = true ]; then
@@ -314,10 +330,10 @@ cleanup() {
         docker stop "$CONTAINER_NAME" 2>/dev/null || true
         docker rm "$CONTAINER_NAME" 2>/dev/null || true
     fi
-    # Clean up test identities (ignore errors — best-effort cleanup)
-    for id in "$ADMIN_IDENTITY" "$OPERATOR_IDENTITY" "$USER_IDENTITY" \
-              "$PROFIT_IDENTITY" "$CONTROLLER_IDENTITY" "$PROTOCOL_IDENTITY" "e2e-new-admin"; do
-        stellar keys rm "$id" 2>/dev/null || true
+    # Best-effort; the ${..+..} form keeps an empty array safe under set -u
+    # on bash 3.2 (macOS).
+    for id in ${CREATED_IDENTITIES[@]+"${CREATED_IDENTITIES[@]}"}; do
+        remove_identity "$id"
     done
 }
 
@@ -363,11 +379,23 @@ done
 # ---------------------------------------------------------------------------
 phase 0 "Prerequisites check"
 
+# Must match the protocol of the quickstart image below. A newer major CLI
+# targets a newer protocol, so the major version is matched exactly.
+# In CI, STELLAR_CLI_VERSION comes from ci.yml, so the pin lives in one place.
+REQUIRED_STELLAR_CLI_VERSION="${STELLAR_CLI_VERSION:-30.0.1}"
+
 if ! command -v stellar &>/dev/null; then
-    fail "stellar CLI not found. Install with: cargo install stellar-cli --locked"
+    fail "stellar CLI not found. Install with: cargo install stellar-cli --locked --version $REQUIRED_STELLAR_CLI_VERSION"
     exit 1
 fi
-log "stellar CLI: $(stellar --version 2>/dev/null || echo 'unknown version')"
+# The script also relies on CLI 30 behaviour (`keys rm --force`, SAC
+# `approve --live_until_ledger`), so fail here rather than deep in a run.
+INSTALLED_STELLAR_CLI_VERSION=$(stellar --version 2>/dev/null | awk 'NR==1 {print $2}' || true)
+if [ "${INSTALLED_STELLAR_CLI_VERSION%%.*}" != "${REQUIRED_STELLAR_CLI_VERSION%%.*}" ]; then
+    fail "stellar CLI ${INSTALLED_STELLAR_CLI_VERSION:-unknown} does not match protocol ${REQUIRED_STELLAR_CLI_VERSION%%.*}; need ${REQUIRED_STELLAR_CLI_VERSION%%.*}.x. Install with: cargo install stellar-cli --locked --version $REQUIRED_STELLAR_CLI_VERSION"
+    exit 1
+fi
+log "stellar CLI: $INSTALLED_STELLAR_CLI_VERSION"
 
 if ! command -v curl &>/dev/null; then
     fail "curl not found (required for health checks and friendbot funding)"
@@ -398,13 +426,11 @@ else
     docker stop "$CONTAINER_NAME" 2>/dev/null || true
     docker rm "$CONTAINER_NAME" 2>/dev/null || true
 
-    # Pinned to an immutable quickstart build (protocol 25, core v26.1.0)
-    # instead of the rolling :testing tag. :testing now ships a pre-release
-    # Soroban host (protocol 27) that no released stellar-cli is compatible
-    # with, so `stellar contract asset deploy` fails at simulation with
-    # HostError: Error(Context, InternalError). Keep this in lockstep with the
-    # stellar-cli version (v25.1.0): both must speak the same protocol.
-    QUICKSTART_IMAGE="stellar/quickstart:v638-b1076.1-testing"
+    # Pinned to an immutable protocol 30 build instead of the rolling :testing
+    # tag, which can jump to a pre-release host that no released stellar-cli
+    # supports. Keep in lockstep with STELLAR_CLI_VERSION and the service image
+    # in .github/workflows/ci.yml.
+    QUICKSTART_IMAGE="stellar/quickstart:v690-b1601.1-testing"
     log "Starting $QUICKSTART_IMAGE in standalone mode..."
     docker run -d \
         --name "$CONTAINER_NAME" \
@@ -482,12 +508,7 @@ phase 3 "Create test identities and fund accounts"
 
 for identity in "$ADMIN_IDENTITY" "$OPERATOR_IDENTITY" "$USER_IDENTITY" \
                 "$PROFIT_IDENTITY" "$CONTROLLER_IDENTITY" "$PROTOCOL_IDENTITY"; do
-    # Remove if exists from a previous run
-    stellar keys rm "$identity" 2>/dev/null || true
-    if ! stellar keys generate "$identity"; then
-        fail "Could not generate key for $identity"
-        exit 1
-    fi
+    fresh_identity "$identity"
     ADDRESS=$(get_address "$identity")
     log "Created $identity: $ADDRESS"
 
@@ -1441,8 +1462,7 @@ log "9.5a: Two-step admin transfer"
 
 # Create a new identity for the new admin
 NEW_ADMIN_IDENTITY="e2e-new-admin"
-stellar keys rm "$NEW_ADMIN_IDENTITY" 2>/dev/null || true
-stellar keys generate "$NEW_ADMIN_IDENTITY" || { fail "Could not generate $NEW_ADMIN_IDENTITY key"; exit 1; }
+fresh_identity "$NEW_ADMIN_IDENTITY"
 NEW_ADMIN_ADDRESS=$(get_address "$NEW_ADMIN_IDENTITY")
 fund_account "$NEW_ADMIN_IDENTITY" "$NEW_ADMIN_ADDRESS"
 log "Created and funded new-admin: $NEW_ADMIN_ADDRESS"
@@ -1655,8 +1675,7 @@ echo ""
 log "9.6a: Register a Wallet subaccount"
 
 WALLET_IDENTITY="e2e-wallet"
-stellar keys rm "$WALLET_IDENTITY" 2>/dev/null || true
-stellar keys generate "$WALLET_IDENTITY" || { fail "Could not generate $WALLET_IDENTITY key"; exit 1; }
+fresh_identity "$WALLET_IDENTITY"
 WALLET_ADDRESS=$(get_address "$WALLET_IDENTITY")
 fund_account "$WALLET_IDENTITY" "$WALLET_ADDRESS"
 log "Created and funded wallet: $WALLET_ADDRESS"
@@ -1735,7 +1754,7 @@ invoke_mut_as "$WALLET_IDENTITY" "$TOKEN_ID" approve \
     --from "$WALLET_ADDRESS" \
     --spender "$VAULT_ID" \
     --amount "$WALLET_PARTIAL_PULL" \
-    --expiration_ledger "$APPROVE_EXPIRATION_LEDGER"
+    --live_until_ledger "$APPROVE_EXPIRATION_LEDGER"
 
 invoke_mut_as "$OPERATOR_IDENTITY" "$VAULT_ID" withdraw_from_subaccount \
     --operator "$OPERATOR_ADDRESS" \
@@ -1948,10 +1967,6 @@ SUBACCOUNTS_FINAL=$(invoke_read "$VAULT_ID" get_subaccounts)
 assert_not_contains "Wallet removed at end of phase 9.6" \
     "$SUBACCOUNTS_FINAL" "$WALLET_ADDRESS"
 
-stellar keys rm "$WALLET_IDENTITY" 2>/dev/null || true
-
-# Clean up new admin identity
-stellar keys rm "$NEW_ADMIN_IDENTITY" 2>/dev/null || true
 
 # ---------------------------------------------------------------------------
 # Phase 10: Summary
