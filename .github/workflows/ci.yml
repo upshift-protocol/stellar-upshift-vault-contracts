@@ -462,7 +462,7 @@ jobs:
     # CoinFabrik Scout detects Soroban footguns clippy can't see (unchecked
     # auth, unsafe unwrap/expect, unbounded storage, integer issues). Findings
     # are split into NEW vs reviewed (.github/scout-baseline.json) in the job
-    # summary; new criticals are annotated. Nothing here gates merges (not in
+    # summary; new critical findings are annotated. Nothing here gates merges (not in
     # CI Pass); the job fails only if Scout itself breaks (no report).
     #
     # Runs the coinfabrik/scout image directly (pinned by digest) rather than
