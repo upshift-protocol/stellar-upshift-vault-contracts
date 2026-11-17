@@ -18,7 +18,7 @@ fails; skipped jobs (docs-only PRs) count as passing.
 | Code Coverage (PRs) | Line coverage below 80% |
 | Reproducible Build | Built WASM ≠ `reproducible-hashes.txt`, **or** public interface ≠ `interfaces/<pkg>.rs` |
 | Workflow Lint | actionlint + zizmor on the workflows themselves (template injection, unpinned actions, broad permissions) |
-| Scout (advisory, not in `CI Pass`) | Soroban-specific static analysis. The job summary separates **new** findings from ones reviewed in `.github/scout-baseline.json`; new criticals get a PR annotation. Fails only if Scout itself breaks |
+| Scout (advisory, not in `CI Pass`) | Soroban-specific static analysis. The job summary separates **new** findings from ones reviewed in `.github/scout-baseline.json`; new critical findings get a PR annotation. Fails only if Scout itself breaks |
 
 ## Scheduled
 

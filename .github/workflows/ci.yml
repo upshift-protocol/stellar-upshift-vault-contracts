@@ -72,7 +72,7 @@ jobs:
                   persist-credentials: false
 
             - name: Setup Rust
-              uses: dtolnay/rust-toolchain@035fceb3c12fb0c6a9461b52775e16473133e591 # 1.95.0
+              uses: dtolnay/rust-toolchain@1961bfc0c4a8bf07e0a0c98e1e2459c642ea70a0 # 1.95.0
               with:
                   components: rustfmt
 
@@ -93,7 +93,7 @@ jobs:
                   persist-credentials: false
 
             - name: Setup Rust
-              uses: dtolnay/rust-toolchain@035fceb3c12fb0c6a9461b52775e16473133e591 # 1.95.0
+              uses: dtolnay/rust-toolchain@1961bfc0c4a8bf07e0a0c98e1e2459c642ea70a0 # 1.95.0
               with:
                   components: clippy
                   targets: wasm32-unknown-unknown
@@ -176,7 +176,7 @@ jobs:
                   persist-credentials: false
 
             - name: Setup Rust
-              uses: dtolnay/rust-toolchain@035fceb3c12fb0c6a9461b52775e16473133e591 # 1.95.0
+              uses: dtolnay/rust-toolchain@1961bfc0c4a8bf07e0a0c98e1e2459c642ea70a0 # 1.95.0
               with:
                   targets: wasm32-unknown-unknown
 
@@ -273,7 +273,7 @@ jobs:
                   persist-credentials: false
 
             - name: Setup Rust
-              uses: dtolnay/rust-toolchain@035fceb3c12fb0c6a9461b52775e16473133e591 # 1.95.0
+              uses: dtolnay/rust-toolchain@1961bfc0c4a8bf07e0a0c98e1e2459c642ea70a0 # 1.95.0
               with:
                   targets: wasm32-unknown-unknown
 
@@ -321,7 +321,7 @@ jobs:
                   persist-credentials: false
 
             - name: Setup Rust
-              uses: dtolnay/rust-toolchain@035fceb3c12fb0c6a9461b52775e16473133e591 # 1.95.0
+              uses: dtolnay/rust-toolchain@1961bfc0c4a8bf07e0a0c98e1e2459c642ea70a0 # 1.95.0
               with:
                   components: llvm-tools-preview
 
@@ -462,7 +462,7 @@ jobs:
     # CoinFabrik Scout detects Soroban footguns clippy can't see (unchecked
     # auth, unsafe unwrap/expect, unbounded storage, integer issues). Findings
     # are split into NEW vs reviewed (.github/scout-baseline.json) in the job
-    # summary; new criticals are annotated. Nothing here gates merges (not in
+    # summary; new critical findings are annotated. Nothing here gates merges (not in
     # CI Pass); the job fails only if Scout itself breaks (no report).
     #
     # Runs the coinfabrik/scout image directly (pinned by digest) rather than

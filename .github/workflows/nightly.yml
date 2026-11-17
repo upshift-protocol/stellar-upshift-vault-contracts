@@ -48,7 +48,7 @@ jobs:
                   persist-credentials: false
 
             - name: Setup Rust
-              uses: dtolnay/rust-toolchain@035fceb3c12fb0c6a9461b52775e16473133e591 # 1.95.0
+              uses: dtolnay/rust-toolchain@1961bfc0c4a8bf07e0a0c98e1e2459c642ea70a0 # 1.95.0
 
             - name: Cache Cargo
               uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
