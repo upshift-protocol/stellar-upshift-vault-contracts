@@ -10,5 +10,5 @@
 # Reproduce locally: see VERIFY.md § B.
 #
 # package       sha256
-august-vault    c88ee1b8a60a7f9581969e6c098610d2a43a569df076e26fda43809daa16fe25
-xlm-strategy    db117a8bacfa237dbce24c54d4579ce805921512f56d2a96b82ac57b21eb9d2c
+august-vault    a2779b8b9b4d01f9af55ea0e90bdb775a8b602fc4b5a690230105e306dea9d00
+xlm-strategy    be38ae71060d4f71259e5518f8540d3ac07c7a326e74267da210931216a51b7f
