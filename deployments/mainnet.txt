@@ -1,0 +1,9 @@
+# Approved on-chain WASM for every live mainnet contract, checked hourly by
+# .github/workflows/mainnet-monitor.yml (see docs/CI.md).
+#
+# After an APPROVED upgrade, update the hash here in a PR; until it merges the
+# monitor keeps alerting.
+#
+# name            contract_id                                               sha256
+gami-earn-usdc    CCL3WITWFFXIHV2I52ECV5DPIEOFSTU3PBPR53ILPLF2IP5KHECXRUTY  4b3d9f6b09f7127b0ce81b0ce9d8428f3f960e4e3ce13c11c1cbb446cccc9e73
+gami-earn-xlm     CC6TRAPQD3NK7THUKWPV5SL2JHKQGNXZVB6S6MVYFSLRWAKEFUWZKZ7J  4b3d9f6b09f7127b0ce81b0ce9d8428f3f960e4e3ce13c11c1cbb446cccc9e73

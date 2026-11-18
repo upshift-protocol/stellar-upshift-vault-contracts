@@ -1,0 +1,29 @@
+{
+  "_comment": "Scout findings reviewed and accepted as false positives. An entry covers a finding when: detector matches; the file path ends with `file`; the flagged span text contains `match`, and the source line at the span contains `line`. No line numbers are stored, so entries survive unrelated edits, and a new finding elsewhere is never hidden. Add an entry only with a reviewer-checkable reason.",
+  "reviewed": [
+    {
+      "detector": "integer_overflow_or_underflow",
+      "file": "august-vault/src/contract.rs",
+      "match": "tracked - actual_received",
+      "line": "let new_wallet_net = tracked - actual_received;",
+      "reason": "withdraw_from_subaccount: guarded two lines above by `if actual_received > tracked { panic WalletOverWithdraw }` and `actual_received > 0`, so 0 <= result <= tracked. overflow-checks = true in release as a backstop.",
+      "reviewed": "2026-11-03"
+    },
+    {
+      "detector": "unrestricted_transfer_from",
+      "file": "august-vault/src/contract.rs",
+      "match": "subaccount",
+      "line": "token_client.transfer_from(&vault_addr, &subaccount, &vault_addr, &amount);",
+      "reason": "Operator-only, not paused; `subaccount` must be admin-whitelisted and of type Wallet; spender and recipient are the vault itself so funds only move into the vault, bounded by the wallet owner's allowance on the vault's own asset and by WalletOverWithdraw.",
+      "reviewed": "2026-11-03"
+    },
+    {
+      "detector": "integer_overflow_or_underflow",
+      "file": "august-vault/src/contract.rs",
+      "match": "(i + 1)",
+      "line": "for j in (i + 1)..count {",
+      "reason": "update_wallet_deployed_batch duplicate scan: i < count <= MAX_SUBACCOUNTS (10), enforced by the early MaxSubaccountsReached return, so i + 1 <= 10. overflow-checks = true as a backstop.",
+      "reviewed": "2026-11-03"
+    }
+  ]
+}

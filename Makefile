@@ -1,4 +1,4 @@
-.PHONY: build test fmt fmt-fix clippy check clean optimize deploy-testnet deploy-mainnet deploy-all deploy-all-with-env deploy-strategy e2e setup upgrade configure add-strategy
+.PHONY: build test fmt fmt-fix clippy check clean optimize deploy-testnet deploy-mainnet deploy-all deploy-all-with-env deploy-strategy e2e setup upgrade configure add-strategy interfaces
 
 # Build the contract WASM
 build:
@@ -26,6 +26,15 @@ check: fmt clippy test build
 # Clean build artifacts
 clean:
 	cargo clean
+
+# Regenerate interfaces/<pkg>.rs (the committed public interface CI checks).
+# Use Stellar CLI 27.0.0 to match CI byte-for-byte; see interfaces/README.md.
+interfaces:
+	@for pkg in august-vault xlm-strategy; do \
+	  stellar contract build --optimize --package $$pkg --out-dir out-$$pkg >/dev/null && \
+	  stellar contract info interface --wasm out-$$pkg/*.wasm --output rust > interfaces/$$pkg.rs && \
+	  echo "wrote interfaces/$$pkg.rs"; \
+	done
 
 # Optimize the WASM binary (requires stellar CLI)
 optimize: build

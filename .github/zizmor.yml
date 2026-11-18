@@ -1,0 +1,7 @@
+# zizmor configuration (auto-discovered by the Workflow Lint job).
+rules:
+    # Wants the newer `$/...` self-repository syntax for local actions. We keep
+    # the long-standing `./.github/actions/...` form, which every runner and
+    # actionlint support; it resolves to the same checked-out commit.
+    self-repository:
+        disable: true
